@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#0f1216">
+<title>实验助手 · 单文件全量版</title>
+<style>
+  :root { --bg:#0f1216; --card:#171c22; --line:#242c36; --txt:#e8edf2; --dim:#8fa0b3; --acc:#4c9aff; --ok:#37c98b; --warn:#e8b339; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:15px/1.55 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  .wrap { max-width:820px; margin:0 auto; padding:10px 10px 100px; }
+  header { display:flex; align-items:center; gap:8px; padding:4px 2px; }
+  header b { font-size:16px; }
+  #st { margin-left:auto; font-size:12px; color:var(--dim); }
+  .bar { display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:12px; color:var(--dim); padding:4px 2px; }
+  #camwrap { position:relative; background:#000; border-radius:12px; overflow:hidden; display:none; }
+  video#cam { width:100%; display:block; max-height:52vh; object-fit:cover; }
+  #camwrap .zoom { position:absolute; right:8px; bottom:8px; display:flex; gap:6px; }
+  #camwrap .zoom button { background:rgba(20,26,34,.75); padding:6px 9px; }
+  #log { display:flex; flex-direction:column; gap:8px; margin:10px 0; }
+  .m { max-width:88%; padding:8px 11px; border-radius:12px; white-space:pre-wrap; word-break:break-word; }
+  .me { align-self:flex-end; background:#1d3557; }
+  .ai { align-self:flex-start; background:var(--card); border:1px solid var(--line); }
+  .sys { align-self:center; color:var(--dim); font-size:12px; text-align:center; max-width:96%; }
+  .row { display:flex; gap:6px; }
+  button { background:var(--card); color:var(--txt); border:1px solid var(--line); border-radius:10px; padding:9px 12px; font-size:14px; }
+  button:active { transform:scale(.97); }
+  button.p { background:var(--acc); border-color:var(--acc); color:#fff; }
+  button.sm { padding:6px 9px; font-size:12px; }
+  #foot { position:fixed; left:0; right:0; bottom:0; background:rgba(15,18,22,.96); border-top:1px solid var(--line); padding:8px 10px; }
+  #foot .in { max-width:820px; margin:0 auto; display:flex; gap:6px; align-items:center; }
+  #q { flex:1; min-width:0; background:var(--card); color:var(--txt); border:1px solid var(--line); border-radius:10px; padding:10px; font-size:15px; }
+  .panel { display:none; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px; margin-top:8px; }
+  .panel label { display:block; font-size:12px; color:var(--dim); margin:6px 0 2px; }
+  .panel input, .panel textarea, .panel select { width:100%; background:var(--bg); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:8px; font-size:13px; }
+  .hint { font-size:12px; color:var(--dim); padding:2px; }
+  .dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--dim); margin-right:4px; }
+  .dot.on { background:var(--ok); } .dot.work { background:var(--warn); }
+  .item { display:flex; gap:6px; align-items:center; border-bottom:1px solid var(--line); padding:6px 2px; font-size:13px; }
+  .item .grow { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .item.act { background:#12233a; border-radius:8px; }
+  .tag { font-size:11px; color:var(--dim); border:1px solid var(--line); border-radius:6px; padding:1px 5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <b>🔬 实验助手</b><span class="hint">单文件全量版</span>
+    <span id="st"><span class="dot"></span><span id="stt">就绪</span></span>
+  </header>
+
+  <div class="bar">
+    <button id="camBtn" class="sm">📷 开摄像头</button>
+    <button id="snap" class="sm">拍一张</button>
+    <button id="rec" class="sm">🎬 录视频</button>
+    <button id="mic" class="sm">🎤 说话</button>
+    <button id="fsBtn" class="sm">⛶ 全屏</button>
+    <button id="feedBtn" class="sm">📡 推流:关</button>
+    <button id="docsBtn" class="sm">📚 资料<span id="docCount"></span></button>
+    <button id="histBtn" class="sm">🕘 历史</button>
+    <button id="cfgBtn" class="sm">⚙️ 设置</button>
+    <span id="keywarn" class="hint">未填 API Key</span>
+  </div>
+
+  <div id="camwrap">
+    <video id="cam" autoplay playsinline muted></video>
+    <div class="zoom"><button data-z="1">1×</button><button data-z="2">2×</button><button data-z="3">3×</button></div>
+  </div>
+
+  <!-- 资料 -->
+  <div id="docsPanel" class="panel">
+    <div class="row">
+      <select id="docgroup" style="flex:1"></select>
+      <button id="newgroup" class="sm">＋新实验</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button id="pickdoc" class="sm p">＋ 加资料（照片 / 视频 / PDF / Word / PPT / txt）</button>
+      <button id="delgroup" class="sm">删本组</button>
+    </div>
+    <div id="doclist"></div>
+    <div class="hint">一次实验一组。只有「当前实验」的资料会喂给模型。全部存在这台设备里（IndexedDB），不上传任何服务器。</div>
+  </div>
+
+  <!-- 历史 -->
+  <div id="histPanel" class="panel">
+    <div class="row"><button id="newsess" class="sm p">＋ 新对话</button><button id="closesess" class="sm">收起</button></div>
+    <div id="histlist"></div>
+    <div class="hint">对话存在本机浏览器里，不跨设备。</div>
+  </div>
+
+  <!-- 设置 -->
+  <div id="cfgPanel" class="panel">
+    <label>接口地址（OpenAI 兼容）</label>
+    <input id="c_base" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1">
+    <label>API Key（只存在本机浏览器里，不上传任何服务器）</label>
+    <input id="c_key" type="password" placeholder="sk-...">
+    <label>对话模型 / 视觉模型 / 语音识别模型</label>
+    <input id="c_model" placeholder="qwen-plus"><input id="c_vl" placeholder="qwen-vl-max" style="margin-top:4px">
+    <input id="c_asr" placeholder="qwen3-asr-flash" style="margin-top:4px">
+    <label>联网搜索（可选，填 Tavily key；不填就没有搜索）</label>
+    <input id="c_tavily" type="password" placeholder="tvly-...">
+    <label>语音播报</label>
+    <select id="c_tts"><option value="1">开（用手机自带语音，免费）</option><option value="0">关</option></select>
+    <label>声纹（只认我的声音）—— 模型文件地址</label>
+    <input id="c_spkurl" placeholder="./campplus.onnx">
+    <label>声纹阈值（本人相似度高于它才认；默认 0.62）</label>
+    <input id="c_spkth" placeholder="0.62">
+    <div class="row" style="margin-top:6px">
+      <button id="enrollBtn" class="sm">👤 注册我的声音（录 3 段）</button>
+      <button id="spkClear" class="sm">清除声纹</button>
+    </div>
+    <div class="hint" id="spkStatus">声纹：未注册</div>
+    <label>系统提示词（教它怎么帮你 —— 按自己的实验改）</label>
+    <textarea id="c_sys" rows="4"></textarea>
+    <div class="row" style="margin-top:8px"><button id="cfgSave" class="p">保存</button><button id="cfgClose">关闭</button></div>
+    <div class="hint">手机要用摄像头必须 https 或 localhost。把本文件丢到任意静态托管即可。</div>
+  </div>
+
+  <div id="log"></div>
+</div>
+
+<div id="foot"><div class="in">
+  <input id="q" placeholder="说话或打字…（空着发=发画面）">
+  <button id="send" class="p">发送</button>
+</div></div>
+
+<input type="file" id="vfile" accept="video/*" capture="environment" style="display:none">
+<input type="file" id="dfile" accept=".pdf,.docx,.pptx,.xlsx,.txt,.md,.csv,image/*,video/*" multiple style="display:none">
+
+<script>
+(async () => {
+/* =====================================================================
+   实验助手 · 单文件全量版（无服务器）
+   全部功能跑在浏览器：资料库(IndexedDB) / 多会话 / 语音播报 / 视频抽帧 /
+   旁白转写 / 推流帧缓存 / 联网搜索(可选)。数据不出本机。
+   ===================================================================== */
+const $ = id => document.getElementById(id);
+const LS = 'lab_full_cfg_v1';
+const DEF = {
+  base: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  model: 'qwen-plus', vl: 'qwen-vl-max', asr: 'qwen3-asr-flash',
+ tavily: '', tts: '1', spkurl: './campplus.onnx', spkth: '0.62',
+  sys: '你是实验课的现场助教。学生正站在仪器前，用手机拍给你看。\n'
+     + '回答要求：只说该做什么，一次 3 步以内；先给判断依据（看到什么），再给动作；不确定就让学生补拍一张。不要长篇原理。'
+};
+let cfg = Object.assign({}, DEF, JSON.parse(localStorage.getItem(LS) || '{}'));
+let camStream = null, shot = null, mediaRec = null, recChunks = [];
+let feedOn = false, feedTimer = null, feedFrames = [];     // 推流帧缓存（本机）
+let sessionId = null, chatHistory = [];
+const DOC_INJECT_LIMIT = 6000;                              // 资料注入上限（字符）
+
+function setSt(t, cls) { $('stt').textContent = t; $('st').firstElementChild.className = 'dot ' + (cls || ''); }
+function say(cls, text) { const d = document.createElement('div'); d.className = 'm ' + cls; d.textContent = text; $('log').appendChild(d); window.scrollTo(0, 1e9); return d; }
+function sys(t) { return say('sys', t); }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+/* ============ 存储：IndexedDB（资料 / 会话） ============ */
+const DB = await new Promise((res, rej) => {
+  const r = indexedDB.open('lab_full', 1);
+  r.onupgradeneeded = () => {
+    const d = r.result;
+    if (!d.objectStoreNames.contains('docs')) d.createObjectStore('docs', { keyPath: 'id', autoIncrement: true });
+    if (!d.objectStoreNames.contains('sessions')) d.createObjectStore('sessions', { keyPath: 'id' });
+  };
+  r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+});
+function tx(store, mode) { return DB.transaction(store, mode).objectStore(store); }
+function dbAll(store) { return new Promise(r => { const q = tx(store).getAll(); q.onsuccess = () => r(q.result); }); }
+function dbPut(store, v) { return new Promise(r => { const q = tx(store, 'readwrite').put(v); q.onsuccess = () => r(q.result); }); }
+function dbDel(store, id) { return new Promise(r => { const q = tx(store, 'readwrite').delete(id); q.onsuccess = () => r(1); }); }
+
+/* ============ 设置 ============ */
+function loadCfg() {
+  $('c_base').value = cfg.base; $('c_key').value = cfg.key || ''; $('c_model').value = cfg.model;
+  $('c_vl').value = cfg.vl; $('c_asr').value = cfg.asr; $('c_sys').value = cfg.sys;
+  $('c_tavily').value = cfg.tavily || ''; $('c_tts').value = cfg.tts || '1';
+  $('c_spkurl').value = cfg.spkurl || ''; $('c_spkth').value = cfg.spkth || '';
+  loadVoiceprint();
+  $('keywarn').style.display = cfg.key ? 'none' : '';
+}
+$('cfgBtn').onclick = () => { loadCfg(); $('cfgPanel').style.display = 'block'; $('docsPanel').style.display = $('histPanel').style.display = 'none'; };
+$('cfgClose').onclick = () => $('cfgPanel').style.display = 'none';
+$('cfgSave').onclick = () => {
+  cfg = Object.assign(cfg, {
+    base: $('c_base').value.trim().replace(/\/$/, ''), key: $('c_key').value.trim(),
+    model: $('c_model').value.trim() || DEF.model, vl: $('c_vl').value.trim() || DEF.vl,
+    asr: $('c_asr').value.trim() || DEF.asr, tavily: $('c_tavily').value.trim(),
+    tts: $('c_tts').value, sys: $('c_sys').value,
+    spkurl: $('c_spkurl').value.trim() || DEF.spkurl, spkth: $('c_spkth').value.trim() || DEF.spkth });
+  localStorage.setItem(LS, JSON.stringify(cfg));
+  $('cfgPanel').style.display = 'none'; $('keywarn').style.display = cfg.key ? 'none' : '';
+  sys('设置已保存（本机）');
+};
+
+/* ============ 摄像头 / 全屏 / 缩放 / 推流 ============ */
+$('camBtn').onclick = async () => {
+  if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; $('camwrap').style.display = 'none'; $('camBtn').textContent = '📷 开摄像头'; return; }
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 } }, audio: false });
+    $('cam').srcObject = camStream; $('camwrap').style.display = 'block'; $('camBtn').textContent = '⏹ 关摄像头';
+    if (navigator.wakeLock) { try { window.__wl = await navigator.wakeLock.request('screen'); } catch (e) {} }
+  } catch (e) { sys('开摄像头失败：' + e.message + '（需要 https 或 localhost）'); }
+};
+$('camwrap').querySelectorAll('.zoom button').forEach(b => b.onclick = () => {
+  const z = +b.dataset.z;
+  try { camStream.getVideoTracks()[0].applyConstraints({ advanced: [{ zoom: z }] }); }
+  catch (e) { $('cam').style.transform = `scale(${z})`; }
+});
+$('fsBtn').onclick = () => {
+  const el = $('camwrap').style.display === 'block' ? $('camwrap') : document.documentElement;
+  if (document.fullscreenElement) document.exitFullscreen();
+  else (el.requestFullscreen ? el.requestFullscreen() : sys('这台设备不支持全屏 API'));
+};
+$('feedBtn').onclick = () => {
+  feedOn = !feedOn; $('feedBtn').textContent = '📡 推流:' + (feedOn ? '开' : '关');
+  clearInterval(feedTimer);
+  if (feedOn) feedTimer = setInterval(() => {
+    if (!camStream) return;
+    const f = grabFrame(720); if (!f) return;
+    feedFrames.push({ t: Date.now(), d: f });
+    if (feedFrames.length > 6) feedFrames.shift();
+  }, 1000);
+};
+function grabFrame(maxw = 1024) {
+  const v = $('cam');
+  if (!camStream || !v.videoWidth) return null;
+  const s = Math.min(1, maxw / v.videoWidth), c = document.createElement('canvas');
+  c.width = v.videoWidth * s; c.height = v.videoHeight * s;
+  c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.75);
+}
+$('snap').onclick = () => { const f = grabFrame(); if (!f) return sys('先开摄像头'); shot = f; sys('📷 已拍一张，接着问就行'); };
+
+/* ============ 录视频：本地抽帧 + 旁白转写 ============ */
+$('rec').onclick = async () => {
+  if (!mediaRec) {
+    try {
+      const st = camStream || await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: true });
+      if (!camStream) { camStream = st; $('cam').srcObject = st; $('camwrap').style.display = 'block'; $('camBtn').textContent = '⏹ 关摄像头'; }
+      const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus') ? 'video/webm;codecs=vp8,opus' : 'video/webm';
+      mediaRec = new MediaRecorder(camStream, { mimeType: mime }); recChunks = [];
+      mediaRec.ondataavailable = e => e.data.size && recChunks.push(e.data);
+      mediaRec.onstop = () => onClip(new Blob(recChunks, { type: 'video/webm' }));
+      mediaRec.start(); $('rec').textContent = '⏹ 停止录制'; setSt('录制中…', 'work');
+    } catch (e) { sys('录制失败：' + e.message + '（需要 https 或 localhost，且允许麦克风）'); }
+  } else { mediaRec.stop(); mediaRec = null; $('rec').textContent = '🎬 录视频'; }
+};
+
+async function videoFrames(blob, n = 4) {
+  const v = document.createElement('video'); v.muted = true; v.playsInline = true;
+  v.src = URL.createObjectURL(blob);
+  await new Promise((res, rej) => { v.onloadeddata = res; v.onerror = () => rej(new Error('视频解码失败')); });
+  const dur = Math.min(v.duration || 0, 120), out = [];
+  const grab = () => {
+    const w = v.videoWidth || 640, h = v.videoHeight || 480, s = Math.min(1, 1024 / w);
+    const c = document.createElement('canvas'); c.width = w * s; c.height = h * s;
+    c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+    out.push(c.toDataURL('image/jpeg', 0.7));
+  };
+  if (!(dur > 0.2)) { grab(); }
+  else {
+    try {
+      await v.play();
+      for (let i = 0; i < n; i++) {
+        const t = dur * (i + 0.5) / n, t0 = performance.now();
+        while (v.currentTime < t && !v.ended && performance.now() - t0 < 5000) await new Promise(r => setTimeout(r, 40));
+        grab();
+      }
+      v.pause();
+    } catch (e) {
+      for (let i = 0; i < n; i++) {
+        const t = dur * (i + 0.5) / n;
+        await new Promise(res => { v.onseeked = res; v.currentTime = t; setTimeout(res, 600); });
+        grab();
+      }
+    }
+  }
+  URL.revokeObjectURL(v.src);
+  return out;
+}
+
+async function audioWav16k(blob) {
+  let buf; try { buf = await blob.arrayBuffer(); } catch (e) { return null; }
+  const ac = new (window.AudioContext || window.webkitAudioContext)();
+  let audio; try { audio = await ac.decodeAudioData(buf.slice(0)); } catch (e) { return null; }
+  const ch = audio.numberOfChannels > 1
+    ? (() => { const o = new Float32Array(audio.length);
+               for (let c = 0; c < audio.numberOfChannels; c++) { const d = audio.getChannelData(c); for (let i = 0; i < d.length; i++) o[i] += d[i] / audio.numberOfChannels; } return o; })()
+    : audio.getChannelData(0);
+  const rate = 16000, ratio = audio.sampleRate / rate, n = Math.floor(ch.length / ratio);
+  const pcm = new Int16Array(n);
+  for (let i = 0; i < n; i++) { const x = Math.max(-1, Math.min(1, ch[Math.floor(i * ratio)])); pcm[i] = x < 0 ? x * 0x8000 : x * 0x7fff; }
+  const head = new DataView(new ArrayBuffer(44));
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) head.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, 'RIFF'); head.setUint32(4, 36 + pcm.byteLength, true); ws(8, 'WAVEfmt ');
+  head.setUint32(16, 16, true); head.setUint16(20, 1, true); head.setUint16(22, 1, true);
+  head.setUint32(24, rate, true); head.setUint32(28, rate * 2, true); head.setUint16(32, 2, true);
+  head.setUint16(34, 16, true); ws(36, 'data'); head.setUint32(40, pcm.byteLength, true);
+  return new Blob([new Uint8Array(head.buffer), new Uint8Array(pcm.buffer)], { type: 'audio/wav' });
+}
+function b64(blob) { return new Promise(res => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.readAsDataURL(blob); }); }
+
+async function asr(blob) {
+  if (!cfg.key) return '';
+  const data = await b64(blob);
+  const r = await fetch(cfg.base + '/chat/completions', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key },
+    body: JSON.stringify({ model: cfg.asr, messages: [{ role: 'user', content: [{ type: 'input_audio', input_audio: { data: 'data:audio/wav;base64,' + data } }] }] })
+  });
+  const d = await r.json();
+  return (d.choices && d.choices[0] && d.choices[0].message.content || '').trim();
+}
+
+async function onClip(blob) {
+  if (!blob.size) return sys('没录到内容');
+  setSt('处理视频中…', 'work');
+  sys('本地处理：抽 4 帧 + 把你说的话转文字…');
+  let frames = [], words = '';
+  try { frames = await videoFrames(blob); } catch (e) { sys('抽帧失败：' + e.message); }
+  const wav = await audioWav16k(blob);
+  if (wav && wav.size > 2000) { try { words = await asr(wav); } catch (e) { sys('旁白转写失败：' + e.message); } }
+  const typed = $('q').value.trim(); if (typed) $('q').value = '';
+  shot = null;
+  if (words) sys('📝 你说的：' + words.slice(0, 80) + (words.length > 80 ? '…' : ''));
+  ask(typed, { images: frames, words, isVideo: true });
+}
+$('vfile').onchange = async e => {
+  const f = e.target.files && e.target.files[0]; e.target.value = '';
+  if (f) await onClip(f);
+};
+
+/* ============ 资料库（本机） ============ */
+const DOC_PROMPT = '逐字提取这张图里的全部文字（含表格数字），保留原有结构与顺序；若基本没有文字，就描述画面里有什么、是什么设备。看不清的地方写“看不清”，不要猜。';
+let docGroup = localStorage.getItem('lab_doc_group') || '默认';
+
+async function refreshDocs() {
+  const all = await dbAll('docs');
+  const groups = [...new Set(all.map(d => d.group))];
+  if (!groups.includes(docGroup)) docGroup = groups[0] || '默认';
+  $('docgroup').innerHTML = groups.map(g => `<option${g === docGroup ? ' selected' : ''}>${esc(g)}</option>`).join('') || '<option>默认</option>';
+  const mine = all.filter(d => d.group === docGroup);
+  $('docCount').textContent = mine.length ? ' ' + mine.length : '';
+  $('doclist').innerHTML = mine.map(d =>
+    `<div class="item" data-id="${d.id}"><span class="tag">${d.kind}</span><span class="grow">${esc(d.name)}</span>` +
+    `<span class="hint">${d.chars}字</span><button class="sm" data-del="${d.id}">删</button></div>`).join('')
+    || '<div class="hint">这一组还没资料。拍照/PDF/Word/PPT 都能加。</div>';
+  $('doclist').querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+    await dbDel('docs', +b.dataset.del); refreshDocs(); sys('已删除一条资料');
+  });
+}
+$('docsBtn').onclick = async () => {
+  const p = $('docsPanel');
+  p.style.display = p.style.display === 'block' ? 'none' : 'block';
+  $('histPanel').style.display = $('cfgPanel').style.display = 'none';
+  if (p.style.display === 'block') await refreshDocs();
+};
+$('docgroup').onchange = () => { docGroup = $('docgroup').value; localStorage.setItem('lab_doc_group', docGroup); refreshDocs(); };
+$('newgroup').onclick = () => { const g = prompt('新实验名（例如：色敏传感器）'); if (g) { docGroup = g.trim(); localStorage.setItem('lab_doc_group', docGroup); refreshDocs(); } };
+$('delgroup').onclick = async () => {
+  if (!confirm(`删掉「${docGroup}」这一组的全部资料？`)) return;
+  for (const d of (await dbAll('docs')).filter(x => x.group === docGroup)) await dbDel('docs', d.id);
+  refreshDocs(); sys('已清空该组资料');
+};
+$('pickdoc').onclick = () => $('dfile').click();
+
+/* 载入外部库（多镜像兜底） */
+function loadScript(urls) {
+  return new Promise((res, rej) => {
+    let i = 0;
+    const next = () => {
+      if (i >= urls.length) return rej(new Error('解析库加载失败'));
+      const s = document.createElement('script');
+      s.src = urls[i++]; s.onload = () => res(); s.onerror = next;
+      document.head.appendChild(s);
+    };
+    next();
+  });
+}
+async function ensureLib(what) {
+  if (what === 'pdf' && !window.pdfjsLib) {
+    await loadScript(['https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js',
+                      'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js',
+                      'https://cdn.bootcdn.net/ajax/libs/pdf.js/3.11.174/pdf.min.js']);
+    if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+  }
+  if (what === 'zip' && !window.JSZip) {
+    await loadScript(['https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js',
+                      'https://unpkg.com/jszip@3.10.1/dist/jszip.min.js',
+                      'https://cdn.bootcdn.net/ajax/libs/jszip/3.10.1/jszip.min.js']);
+  }
+}
+
+/* --- 各类文件的文字提取 --- */
+async function vlText(dataUrl) {
+  const r = await fetch(cfg.base + '/chat/completions', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key },
+    body: JSON.stringify({ model: cfg.vl, max_tokens: 1800, messages: [{ role: 'user', content: [
+      { type: 'text', text: DOC_PROMPT }, { type: 'image_url', image_url: { url: dataUrl } }] }] })
+  });
+  const d = await r.json();
+  return ((d.choices || [])[0] || {}).message?.content?.trim() || '';
+}
+async function fileToDataURL(f, maxw = 1400) {
+  const bmp = await createImageBitmap(f);
+  const s = Math.min(1, maxw / bmp.width), c = document.createElement('canvas');
+  c.width = bmp.width * s; c.height = bmp.height * s;
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.8);
+}
+async function extractPdf(f) {
+  await ensureLib('pdf');
+  const buf = await f.arrayBuffer();
+  const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+  let out = '';
+  for (let i = 1; i <= Math.min(doc.numPages, 30); i++) {
+    const page = await doc.getPage(i);
+    const tc = await page.getTextContent();
+    let t = tc.items.map(x => x.str).join(' ').replace(/\s+/g, ' ').trim();
+    if (t.length < 25) {                                   // 扫描件：渲染成图让视觉模型读
+      const vp = page.getViewport({ scale: 2 });
+      const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
+      await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+      t = await vlText(c.toDataURL('image/jpeg', 0.8));
+    }
+    out += `\n【第 ${i} 页】\n${t}`;
+  }
+  return out.trim();
+}
+function xmlToText(xml) {
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+  const parts = [];
+  doc.querySelectorAll('t').forEach(n => parts.push(n.textContent));
+  return parts.join('').replace(/\s+/g, ' ').trim();
+}
+async function extractDocx(f) {
+  await ensureLib('zip');
+  const zip = await JSZip.loadAsync(await f.arrayBuffer());
+  const x = zip.file('word/document.xml');
+  return x ? xmlToText(await x.async('string')) : '';
+}
+async function extractPptx(f) {
+  await ensureLib('zip');
+  const zip = await JSZip.loadAsync(await f.arrayBuffer());
+  const names = Object.keys(zip.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n))
+    .sort((a, b) => (+a.match(/\d+/)[0]) - (+b.match(/\d+/)[0]));
+  let out = '';
+  for (const n of names.slice(0, 60)) out += `\n【${n.match(/\d+/)[0]} 页】\n` + xmlToText(await zip.file(n).async('string'));
+  return out.trim();
+}
+async function addDoc(file, group) {
+  const name = file.name || '资料';
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  const IMG = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'heic'], VID = ['mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm', '3gp'];
+  const isImg = file.type.startsWith('image/') || IMG.includes(ext);
+  const isVid = file.type.startsWith('video/') || VID.includes(ext);
+  let text = '', kind = ext;
+  if (isImg) { kind = '照片'; text = await vlText(await fileToDataURL(file)); }
+  else if (isVid) {
+    kind = '视频';
+    const frames = await videoFrames(file, 4);
+    const wav = await audioWav16k(file);
+    const [words, ...descs] = await Promise.all([
+      (wav && wav.size > 2000) ? asr(wav).catch(() => '') : Promise.resolve(''),
+      ...frames.map(fr => vlText(fr).catch(() => ''))
+    ]);
+    text = (words ? '【视频旁白】\n' + words + '\n\n' : '') +
+           descs.filter(Boolean).map((d, i) => `【第 ${i + 1} 帧】\n${d}`).join('\n\n');
+  }
+  else if (ext === 'pdf') text = await extractPdf(file);
+  else if (ext === 'docx') text = await extractDocx(file);
+  else if (ext === 'pptx') text = await extractPptx(file);
+  else if (['txt', 'md', 'csv', 'json'].includes(ext)) { kind = '文本'; text = (await file.text()).slice(0, 200000); }
+  else throw new Error('不支持的类型：' + ext);
+  if (!text) throw new Error('没提取到内容（可能是空文件或加密文件）');
+  await dbPut('docs', { group, name, kind, text, chars: text.length, ts: Date.now() });
+  return text.length;
+}
+$('dfile').onchange = async e => {
+  const files = [...(e.target.files || [])]; e.target.value = '';
+  if (!files.length) return;
+  setSt('处理资料中…', 'work');
+  for (const f of files) {
+    sys(`正在处理：${f.name}（${Math.round(f.size / 1024)}KB）…`);
+    try { const n = await addDoc(f, docGroup); sys(`✅ ${f.name} 已入库（${n} 字）`); }
+    catch (err) { sys(`❌ ${f.name}：${err.message}`); }
+  }
+  setSt('就绪', 'on'); refreshDocs();
+};
+
+/* ============ 会话（本机多会话） ============ */
+async function saveSession() {
+  if (!sessionId) return;
+  const title = (chatHistory.find(m => m.role === 'user') || {}).content?.slice(0, 24) || '新对话';
+  await dbPut('sessions', { id: sessionId, title: String(title), msgs: chatHistory.slice(-60), ts: Date.now() });
+}
+async function loadSessions() {
+  const all = (await dbAll('sessions')).sort((a, b) => b.ts - a.ts);
+  $('histlist').innerHTML = all.map(s =>
+    `<div class="item${s.id === sessionId ? ' act' : ''}" data-id="${s.id}"><span class="grow">${esc(s.title || '对话')}</span>` +
+    `<span class="hint">${new Date(s.ts).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>` +
+    `<button class="sm" data-open="${s.id}">打开</button><button class="sm" data-rm="${s.id}">删</button></div>`).join('')
+    || '<div class="hint">还没有历史对话</div>';
+  $('histlist').querySelectorAll('[data-open]').forEach(b => b.onclick = async () => {
+    const s = (await dbAll('sessions')).find(x => x.id === b.dataset.open);
+    if (!s) return; sessionId = s.id; chatHistory = s.msgs || [];
+    $('log').innerHTML = '';
+    chatHistory.forEach(m => say(m.role === 'user' ? 'me' : 'ai', m.content));
+    $('histPanel').style.display = 'none'; sys('已打开历史对话（继续聊会接在后面）');
+  });
+  $('histlist').querySelectorAll('[data-rm]').forEach(b => b.onclick = async () => {
+    await dbDel('sessions', b.dataset.rm); if (b.dataset.rm === sessionId) { sessionId = null; chatHistory = []; $('log').innerHTML = ''; }
+    loadSessions();
+  });
+}
+$('histBtn').onclick = async () => {
+  const p = $('histPanel');
+  p.style.display = p.style.display === 'block' ? 'none' : 'block';
+  $('docsPanel').style.display = $('cfgPanel').style.display = 'none';
+  if (p.style.display === 'block') await loadSessions();
+};
+$('closesess').onclick = () => $('histPanel').style.display = 'none';
+$('newsess').onclick = async () => {
+  await saveSession();
+  sessionId = 'S' + Date.now(); chatHistory = []; $('log').innerHTML = '';
+  $('histPanel').style.display = 'none'; sys('新对话开始');
+};
+
+/* ============ 语音播报 ============ */
+function speak(text) {
+  if (cfg.tts !== '1' || !text || !window.speechSynthesis) return;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text.slice(0, 300));
+    u.lang = 'zh-CN'; u.rate = 1.05;
+    const v = speechSynthesis.getVoices().find(x => /zh|Chinese/i.test(x.lang + x.name));
+    if (v) u.voice = v;
+    speechSynthesis.speak(u);
+  } catch (e) {}
+}
+
+/* ============ 联网搜索（可选） ============ */
+async function searchWeb(q) {
+  if (!cfg.tavily) return '';
+  try {
+    const r = await fetch('https://api.tavily.com/search', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: cfg.tavily, query: q, max_results: 3 })
+    });
+    const d = await r.json();
+    return (d.results || []).map(x => `【${x.title}】${(x.content || '').slice(0, 300)}`).join('\n\n');
+  } catch (e) { return ''; }
+}
+
+/* ============ 声纹：在浏览器里跑 CAM++（跟服务端 sherpa-onnx 逐位对齐） ============
+   前端参数照 sherpa-onnx 的 3d-speaker 默认：16k、25ms/10ms、snip_edges=false、
+   remove_dc_offset、preemph 0.97、povey 窗、512 FFT、80 mel（20~7600Hz）、log(floor=FLT_EPSILON)，
+   出特征后按维度减均值（global-mean）→ 模型 [1,T,80] → 192 维嵌入。
+   实测与 Python sherpa-onnx 的余弦 = 0.99999。 */
+const SPK_KEY = 'lab_voiceprint_v1';
+let _spkSess = null, _spkVoice = null;
+
+function melScaleF(f) { return 1127.0 * Math.log(1 + f / 700.0); }
+function poveyWin(n) { const w = new Float32Array(n); for (let i = 0; i < n; i++) w[i] = Math.pow(0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1)), 0.85); return w; }
+function fftInPlace(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) { let bit = n >> 1; for (; j & bit; bit >>= 1) j ^= bit; j ^= bit;
+    if (i < j) { const t = re[i]; re[i] = re[j]; re[j] = t; const u = im[i]; im[i] = im[j]; im[j] = u; } }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) { let cr = 1, ci = 0;
+      for (let k = 0; k < len / 2; k++) {
+        const ur = re[i + k], ui = im[i + k];
+        const vr = re[i + k + len / 2] * cr - im[i + k + len / 2] * ci;
+        const vi = re[i + k + len / 2] * ci + im[i + k + len / 2] * cr;
+        re[i + k] = ur + vr; im[i + k] = ui + vi;
+        re[i + k + len / 2] = ur - vr; im[i + k + len / 2] = ui - vi;
+        const nr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = nr; } } }
+}
+function spkBanks() {
+  const NUM = 80, LOW = 20, HIGH = 7600, FFTN = 512, SR = 16000;
+  const bw = SR / FFTN, nb = FFTN / 2, ml = melScaleF(LOW), mh = melScaleF(HIGH);
+  const d = (mh - ml) / (NUM + 1), B = [];
+  for (let b = 0; b < NUM; b++) {
+    const L = ml + b * d, C = L + d, R = C + d, ws = [];
+    for (let i = 0; i < nb; i++) { const m = melScaleF(i * bw);
+      if (m > L && m < R) ws.push([i, (m <= C) ? (m - L) / (C - L) : (R - m) / (R - C)]); }
+    B.push(ws);
+  }
+  return B;
+}
+const _banks = spkBanks(), _pwin = poveyWin(400), _EPS = 1.19209290e-7;
+function fbank80(samples) {
+  const FL = 400, SH = 160, FFTN = 512, PE = 0.97, N = samples.length;
+  let nf = Math.floor((N + SH / 2) / SH);
+  const first = f => SH * f + SH / 2 - FL / 2;
+  while (nf > 0 && first(nf - 1) + FL > N) nf--;
+  const feats = new Float32Array(nf * 80);
+  for (let f = 0; f < nf; f++) {
+    const st = first(f), fr = new Float32Array(FL);
+    for (let s = 0; s < FL; s++) { let idx = st + s;
+      while (idx < 0 || idx >= N) idx = (idx < 0) ? (-idx - 1) : (2 * N - 1 - idx);
+      fr[s] = samples[idx]; }
+    let mu = 0; for (let s = 0; s < FL; s++) mu += fr[s]; mu /= FL;
+    for (let s = 0; s < FL; s++) fr[s] -= mu;
+    for (let s = FL - 1; s > 0; s--) fr[s] -= PE * fr[s - 1];
+    fr[0] -= PE * fr[0];
+    for (let s = 0; s < FL; s++) fr[s] *= _pwin[s];
+    const re = new Float32Array(FFTN), im = new Float32Array(FFTN);
+    re.set(fr); fftInPlace(re, im);
+    const pw = new Float32Array(FFTN / 2);
+    for (let i = 0; i < FFTN / 2; i++) pw[i] = re[i] * re[i] + im[i] * im[i];
+    for (let b = 0; b < 80; b++) { let e = 0; for (const [i, w] of _banks[b]) e += pw[i] * w;
+      feats[f * 80 + b] = Math.log(Math.max(e, _EPS)); }
+  }
+  for (let b = 0; b < 80; b++) { let s = 0; for (let t = 0; t < nf; t++) s += feats[t * 80 + b];
+    const m = s / nf; for (let t = 0; t < nf; t++) feats[t * 80 + b] -= m; }
+  return { flat: feats, T: nf };
+}
+function cosSim(a, b) { let d = 0, x = 0, y = 0;
+  for (let i = 0; i < a.length; i++) { d += a[i] * b[i]; x += a[i] * a[i]; y += b[i] * b[i]; }
+  return d / (Math.sqrt(x) * Math.sqrt(y)); }
+
+async function spkModel() {
+  if (_spkSess) return _spkSess;
+  if (typeof ort === 'undefined') {
+    setSt('加载推理库…', 'work');
+    await loadScript(['https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/ort.min.js',
+                      'https://fastly.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/ort.min.js',
+                      'https://unpkg.com/onnxruntime-web@1.18.0/dist/ort.min.js']);
+  }
+  setSt('加载声纹模型（约 28MB）…', 'work');
+  _spkSess = await ort.InferenceSession.create(cfg.spkurl || './campplus.onnx', { executionProviders: ['wasm'] });
+  return _spkSess;
+}
+async function embedPcm(pcm) {
+  const sess = await spkModel(), { flat, T } = fbank80(pcm);
+  const out = await sess.run({ [sess.inputNames[0]]: new ort.Tensor('float32', flat, [1, T, 80]) });
+  return Array.from(out[sess.outputNames[0]].data);
+}
+function loadVoiceprint() {
+  try { _spkVoice = JSON.parse(localStorage.getItem(SPK_KEY) || 'null'); } catch (e) { _spkVoice = null; }
+  const th = _spkVoice ? (_spkVoice.th || 0.62) : null;
+  $('spkStatus').textContent = _spkVoice
+    ? `声纹：已注册（${_spkVoice.data.length} 维，阈值 ${th}，注册一致性 ${(_spkVoice.cons || 0).toFixed(3)}）`
+    : '声纹：未注册';
+}
+async function blobToPcm16k(blob) {
+  const buf = await blob.arrayBuffer();
+  let ac;
+  try { ac = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 }); }
+  catch (e) { ac = new (window.AudioContext || window.webkitAudioContext)(); }   // Safari 老版本兜底
+  let audio; try { audio = await ac.decodeAudioData(buf.slice(0)); } catch (e) { return null; }
+  const mix = new Float32Array(audio.length);
+  for (let c = 0; c < audio.numberOfChannels; c++) { const d = audio.getChannelData(c);
+    for (let i = 0; i < d.length; i++) mix[i] += d[i] / audio.numberOfChannels; }
+  if (Math.abs(audio.sampleRate - 16000) < 1) return mix;
+  // 兜底：解码器没按 16k 给（线性重采样，质量一般但能用）
+  const ratio = audio.sampleRate / 16000, n = Math.floor(mix.length / ratio), out = new Float32Array(n);
+  for (let i = 0; i < n; i++) out[i] = mix[Math.floor(i * ratio)];
+  return out;
+}
+function pcmToWav16k(pcm) {
+  const n = pcm.length, view = new DataView(new ArrayBuffer(44 + n * 2));
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, 'RIFF'); view.setUint32(4, 36 + n * 2, true); ws(8, 'WAVEfmt ');
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, 16000, true); view.setUint32(28, 32000, true); view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true); ws(36, 'data'); view.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) { const x = Math.max(-1, Math.min(1, pcm[i]));
+    view.setInt16(44 + i * 2, x < 0 ? x * 0x8000 : x * 0x7fff, true); }
+  return new Blob([view], { type: 'audio/wav' });
+}
+
+/* --- 录一段（默认 2.5 秒或手动停） --- */
+let micRec = null, micChunks = [], micResolve = null;
+async function recordOnce(ms) {
+  const st = await navigator.mediaDevices.getUserMedia({ audio: true });
+  return await new Promise(res => {
+    const rec = new MediaRecorder(st), chunks = [];
+    rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+    rec.onstop = async () => { st.getTracks().forEach(t => t.stop());
+      res(new Blob(chunks, { type: 'audio/webm' })); };
+    rec.start();
+    if (ms) setTimeout(() => { try { rec.stop(); } catch (e) {} }, ms);
+    else { micRec = rec; micResolve = () => rec.stop(); }
+  });
+}
+async function verifyPcm(pcm) {
+  if (!_spkVoice) return { sim: null, pass: true };
+  const sim = cosSim(await embedPcm(pcm), _spkVoice.data);
+  return { sim, pass: sim >= +(_spkVoice.th || 0.62) };
+}
+
+$('mic').onclick = async () => {
+  if (micRec) { try { micRec.stop(); } catch (e) {} const r = micResolve; micRec = null; micResolve = null; r && r(); $('mic').textContent = '🎤 说话'; return; }
+  setSt('录音中…', 'work'); $('mic').textContent = '⏹ 停止';
+  let blob;
+  try { blob = await recordOnce(0); }
+  catch (e) { sys('录音失败：' + e.message); $('mic').textContent = '🎤 说话'; setSt('就绪', 'on'); return; }
+  $('mic').textContent = '🎤 说话';
+  const pcm = await blobToPcm16k(blob);
+  if (!pcm || pcm.length < 16000 * 0.4) { sys('太短了，多说一两秒'); setSt('就绪', 'on'); return; }
+  if (_spkVoice) {
+    try {
+      setSt('校验声纹…', 'work');
+      const v = await verifyPcm(pcm);
+      sys(`声纹相似度 ${v.sim.toFixed(3)}（阈值 ${_spkVoice.th || 0.62}）`);
+      if (!v.pass) { sys('❌ 这不像你本人，没有发出去'); setSt('就绪', 'on'); return; }
+    } catch (e) { sys('声纹校验跳过：' + e.message); }
+  }
+  setSt('转写中…', 'work');
+  let text = '';
+  try { text = await asr(pcmToWav16k(pcm)); } catch (e) { sys('转写失败：' + e.message); }
+  if (!text) { sys('没听清，再说一次？'); setSt('就绪', 'on'); return; }
+  sys('🎤 ' + text);
+  await ask(text, {});
+};
+$('enrollBtn').onclick = async () => {
+  sys('声纹注册：连录 3 段，每段说 2~3 秒（说同一句话最稳，比如「现在开始做实验，一二三四五」）');
+  const embs = [];
+  try {
+    for (let i = 0; i < 3; i++) {
+      sys(`第 ${i + 1}/3 段：现在说…`);
+      const blob = await recordOnce(2800);
+      const pcm = await blobToPcm16k(blob);
+      if (!pcm || pcm.length < 16000 * 0.6) { sys('这段太短，重来'); i--; continue; }
+      embs.push(await embedPcm(pcm));
+      sys(`第 ${i + 1} 段完成`);
+    }
+  } catch (e) { return sys('注册失败：' + e.message); }
+  let cons = 0, cnt = 0;
+  for (let i = 0; i < embs.length; i++) for (let j = i + 1; j < embs.length; j++) { cons += cosSim(embs[i], embs[j]); cnt++; }
+  cons /= cnt || 1;
+  const avg = embs[0].map((_, k) => embs.reduce((s, e) => s + e[k], 0) / embs.length);
+  localStorage.setItem(SPK_KEY, JSON.stringify({ data: avg, th: +cfg.spkth || 0.62, cons }));
+  loadVoiceprint();
+  sys(`✅ 声纹已注册（三段相互一致性 ${cons.toFixed(3)}；>0.8 比较稳）`);
+};
+$('spkClear').onclick = () => { localStorage.removeItem(SPK_KEY); loadVoiceprint(); sys('声纹已清除'); };
+
+/* ============ 提问 ============ */
+$('send').onclick = () => ask($('q').value.trim());
+$('q').addEventListener('keydown', e => { if (e.key === 'Enter') ask($('q').value.trim()); });
+
+async function buildDocContext() {
+  const docs = (await dbAll('docs')).filter(d => d.group === docGroup);
+  if (!docs.length) return '';
+  let out = `【当前实验「${docGroup}」的资料】\n`, used = 0, skipped = 0;
+  for (const d of docs) {
+    const room = DOC_INJECT_LIMIT - used;
+    if (room < 200) { skipped++; continue; }
+    const t = d.text.slice(0, room);
+    out += `\n—— ${d.name} ——\n${t}\n`;
+    used += t.length;
+  }
+  if (skipped) out += `\n（另有 ${skipped} 份资料因篇幅未载入）\n`;
+  return out;
+}
+
+async function ask(text, opts) {
+  const o = opts || {};
+  if (!cfg.key) { sys('先去 ⚙️ 设置里填 API Key'); return; }
+  if (!sessionId) { sessionId = 'S' + Date.now(); }
+  let imgs = o.images && o.images.length ? o.images.slice(0, 4) : (shot ? [shot] : []);
+  let q = text || '';
+  if (o.words) q = (q ? q + '\n\n' : '') + '【我拍视频时说的话】\n' + o.words;
+  if (!q && !imgs.length) {
+    const f = grabFrame(); if (f) imgs = [f];
+    if (!imgs.length && feedFrames.length) imgs = feedFrames.slice(-2).map(x => x.d);
+  }
+  if (!q && !imgs.length) return sys('没内容可发：开摄像头拍照，或打几个字');
+
+  const docCtx = await buildDocContext();
+  say('me', (o.isVideo ? '🎬［视频］ ' : '') + (q || '（看这个画面）'));
+  shot = null;
+  const bubble = say('ai', '…');
+  setSt('思考中…', 'work');
+  speak('嗯，我看一下');
+
+  let searchCtx = '';
+  if (q && q.length > 4 && cfg.tavily && /最新|今年|现在|价格|多少钱|官网/.test(q)) {
+    searchCtx = await searchWeb(q);
+    if (searchCtx) sys('🌐 已联网查了一下');
+  }
+  const content = [{ type: 'text', text: (docCtx ? docCtx + '\n\n' : '') + (searchCtx ? '【联网检索】\n' + searchCtx + '\n\n' : '') + (q || '看看这个画面，告诉我下一步该怎么做。') }];
+  imgs.forEach(u => content.push({ type: 'image_url', image_url: { url: u } }));
+  const msgs = [{ role: 'system', content: cfg.sys }, ...chatHistory.slice(-10),
+                { role: 'user', content: imgs.length ? content : content[0].text }];
+  try {
+    const r = await fetch(cfg.base + '/chat/completions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key },
+      body: JSON.stringify({ model: imgs.length ? cfg.vl : cfg.model, messages: msgs, max_tokens: 1500 })
+    });
+    const d = await r.json();
+    const ans = ((d.choices || [])[0] || {}).message?.content?.trim() ||
+                ('（没答上来）' + JSON.stringify(d).slice(0, 300));
+    bubble.textContent = ans;
+    speak(ans);
+    chatHistory.push({ role: 'user', content: q || '（看画面）' }, { role: 'assistant', content: ans });
+    chatHistory = chatHistory.slice(-40);
+    saveSession();
+    setSt('就绪', 'on');
+  } catch (e) { bubble.textContent = '请求失败：' + e.message; setSt('出错', ''); }
+}
+
+window.__sa = { ask, onClip, videoFrames, audioWav16k, grabFrame, addDoc, buildDocContext,
+                embedPcm, blobToPcm16k, fbank80, cosSim, verifyPcm, loadVoiceprint,
+                get spkVoice() { return _spkVoice; }, set spkVoice(v) { _spkVoice = v; },
+                get cfg() { return cfg; }, set cfg(v) { cfg = v; },
+                get history() { return chatHistory; }, set history(v) { chatHistory = v; } };
+loadCfg(); refreshDocs(); setSt(cfg.key ? '就绪' : '待配置', cfg.key ? 'on' : '');
+speechSynthesis && speechSynthesis.getVoices();
+})();
+</script>
+</body>
+</html>
