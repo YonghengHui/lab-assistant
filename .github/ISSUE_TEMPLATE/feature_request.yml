@@ -1,0 +1,20 @@
+name: 💡 Feature request / 功能建议
+description: An idea that would make it more useful. 觉得缺什么、想加什么。
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does it solve? / 它解决什么问题
+      description: Describe the actual situation at the bench. 描述真实使用场景。
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea / 你的想法
+  - type: markdown
+    attributes:
+      value: |
+        Note: this project deliberately stays small - it is a lab assistant, not a general
+        companion app. 提醒：这个项目有意保持"只管实验台"，通用/娱乐功能会建议另开项目。
