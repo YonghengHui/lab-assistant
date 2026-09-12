@@ -87,7 +87,7 @@ in `lab_server.py`.
 
 ## Roadmap / help wanted
 
-- [ ] English UI + prompts (i18n)
+- [x] English UI + prompts (i18n: auto by browser language, switchable; add a table in `static/i18n.js` for a new language)
 - [ ] Drop-in support for other providers (OpenAI / Gemini / local Ollama)
 - [ ] Better weak-network experience (resumable uploads, offline sampling)
 - [ ] One-command deploy (docker-compose / systemd template)
