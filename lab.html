@@ -238,12 +238,19 @@
   <button id="upload" title="实验资料（照片/PDF/Word/PPT）">📎 资料</button>
   <button id="promptbtn" title="编辑系统提示词">⚙ 提示词</button>
   <button id="websearch" title="联网搜索">🌐 联网：开</button>
+  <button id="langbtn" title="界面语言 / UI language">🌐 中/EN</button>
   <button id="screenbtn" title="共享屏幕（电脑 Chrome 最好用）：共享期间提问/推流都用屏幕画面">🖥 投屏：关</button>
   <button id="filler" title="垫场话：回答前先说一句">💬 垫场：开</button>
   <label id="adaptlab" title="声纹自适应微调">
     <input type="checkbox" id="adapt" checked> 自适应
   </label>
   <button id="adaptreset" title="声纹退回注册状态">重置声纹</button>
+  <span class="glab">回溯</span>
+  <select id="recall" title="提问时回带多久之前的画面（说话前那段最关键）">
+    <option value="10">10 秒</option>
+    <option value="30" selected>30 秒</option>
+    <option value="60">60 秒</option>
+  </select>
   <span class="glab">上下文</span>
   <select id="histsel" title="带几轮历史给模型">
     <option value="0">0 轮</option>
@@ -285,6 +292,7 @@
 </footer>
 
   <!-- VAD（自动挡）的库改成按需加载：手机信号差时不再一进页面就卡在下载 400KB+11MB -->
+<script src="/i18n.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const logEl = $('log'), st = $('st');
@@ -306,13 +314,14 @@ function saveSetting(k, v) {
 
 function say(role, text) {
   const d = document.createElement('div');
-  d.className = 'm ' + role; d.textContent = text;
+  d.className = 'm ' + role; d.textContent = window.__tr ? window.__tr(text) : text;
   logEl.appendChild(d); logEl.scrollTop = logEl.scrollHeight;
   return d;
 }
-function sys(t) { const d=document.createElement('div'); d.className='sys'; d.textContent=t;
+function sys(t) { const d=document.createElement('div'); d.className='sys';
+                  d.textContent = window.__tr ? window.__tr(t) : t;
                   logEl.appendChild(d); logEl.scrollTop=logEl.scrollHeight; }
-function setSt(t, cls='') { st.textContent = t; st.className = cls; }
+function setSt(t, cls='') { st.textContent = window.__tr ? window.__tr(t) : t; st.className = cls; }
 
 /* ================= 摄像头 =================
    坑（查证过）：同一个 MediaStream 挂到两个 <video> 上，第二个会黑屏。
@@ -425,6 +434,9 @@ $('shot').onclick = () => setVid(!vidOn);
    提问时不管语音还是打字都自动用最近几帧当画面。 */
 let vidOn = true, feedTimer = null, feedCanvas = null, sigCanvas = null, lastSig = null;
 let lastFrames = [], lastFrameTs = 0;   // 最近拍到的几帧：摄像头关了也留着，提问时照发
+let ringFrames = [];                    // 最近 60 秒的滚动画面（1 帧/秒，720px）——提问时回带
+const RING_MAX_S = 60;
+let recallSec = 30;                     // 提问时回带多少秒之前的画面（说话前后那段最关键）
 const FEED_MS = 1000;                   // 官方口径：视频帧最多/建议 1 帧每秒（Gemini Live、千问 Omni-Realtime）
 const FEED_SIDE = 720;                  // 推流帧长边（上传小、够看设备与读数）
 
@@ -481,6 +493,23 @@ function rememberFrame(f) {
   lastFrames.push(f);
   if (lastFrames.length > 3) lastFrames.shift();
   lastFrameTs = Date.now();
+  // 同时进 60 秒滚动缓冲（提问时回带"说话前那段"）
+  ringFrames.push({ t: lastFrameTs, img: f });
+  const cut = lastFrameTs - RING_MAX_S * 1000;
+  while (ringFrames.length && ringFrames[0].t < cut) ringFrames.shift();
+}
+
+/* 从滚动缓冲里挑几帧：覆盖最近 recallSec 秒，均匀取最多 max 张（最后一张留最新的） */
+function pickRecallFrames(sec, max) {
+  const now = Date.now(), cut = now - sec * 1000;
+  const pool = ringFrames.filter(x => x.t >= cut);
+  if (!pool.length) return [];
+  if (pool.length <= max) return pool.map(x => x.img);
+  const out = [];
+  for (let i = 0; i < max; i++) {
+    out.push(pool[Math.round(i * (pool.length - 1) / (max - 1))].img);
+  }
+  return out;
 }
 
 function startFeed() {
@@ -620,7 +649,12 @@ async function ask(text, opts) {
   if (o.images && o.images.length) {
     imgs = o.images.slice(0, 6);            // 视频抽的帧（最多 6 张）
   } else {
-    imgs = turnFrames.length ? turnFrames.slice() : (camStream ? [captureFrame()].filter(Boolean) : []);
+    // 回带：说话前那一段画面（720px 的滚动缓冲）+ 当下这一张高清帧
+    const recall = pickRecallFrames(recallSec, 5);
+    const nowShot = camStream ? captureFrame() : null;
+    const cand = [...recall, ...(turnFrames.length ? turnFrames.slice(-2) : []), ...(nowShot ? [nowShot] : [])];
+    const seen = new Set();
+    imgs = cand.filter(x => { const k = x.slice(-64); if (seen.has(k)) return false; seen.add(k); return true; }).slice(-6);
   }
   let staleSec = 0;
   if (!o.images || !o.images.length) {
@@ -635,7 +669,8 @@ async function ask(text, opts) {
   const qHist = (o.isVideo ? '🎬［视频］ ' : '') + (q || (o.videoTranscript ? '（看这段视频）' : '（看这个画面）'));
   say('me', qHist);
   sys(imgs.length
-      ? (staleSec ? `📷 摄像头已关，用 ${staleSec} 秒前拍下的 ${imgs.length} 张画面` : `📷 已带上 ${imgs.length} 张画面`)
+      ? (staleSec ? `📷 摄像头已关，用 ${staleSec} 秒前拍下的 ${imgs.length} 张画面`
+                  : `📷 回带最近 ${recallSec} 秒的 ${imgs.length} 张画面（含提问这一刻）`)
       : '⚠️ 这轮没带画面（点左下相机图标开启）');
   setSt('思考中…', 'work');
   const aiBubble = say('ai', '…');
@@ -656,7 +691,8 @@ async function ask(text, opts) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ question: qFull, images: imgs, history: chatHistory, reasoning: thinking,
-                             search: useSearch, stale_sec: staleSec })
+                             search: useSearch, stale_sec: staleSec, frames_span: recallSec,
+                             lang: window.LAB_LANG || 'zh' })
     });
     const d = await r.json();
     // 文本照常答完，不打断、不标记
@@ -1500,6 +1536,13 @@ $('vfile').onchange = async (e) => {
   setSt('就绪', 'on');
 };
 
+$('langbtn').onclick = () => {
+  const cur = window.LAB_LANG || 'zh';
+  const next = cur === 'zh' ? 'en' : 'zh';
+  try { localStorage.setItem('lab_lang', next); } catch (_) {}
+  location.reload();
+};
+
 /* ================= 屏幕共享（电脑端首选；手机浏览器多半不支持） =================
    开着的时候，抽帧/推流都用屏幕画面，提问就带屏幕内容。 */
 let screenStream = null, screenVideo = null;
@@ -1572,6 +1615,7 @@ function restoreSettings() {
   setMode(s.mode || 'manual');
   if (s.spk === 'on') restoreSpk();
   if (s.zoom) setTimeout(() => applyZoom(Number(s.zoom) || 1), 900);
+  if (s.recall) { recallSec = Number(s.recall) || 30; $('recall').value = String(recallSec); }
   sys('已按上次设置恢复：' + [s.think ? '思考' + ({none:'无',low:'低',high:'高',max:'满'}[s.think] || s.think) : null,
       s.mode === 'auto' ? '自动挡' : '手动挡', s.search === false ? '联网关' : null,
       s.filler === false ? '垫场关' : null, (typeof s.vid === 'boolean' && !s.vid) ? '视频关' : null,
@@ -1584,6 +1628,11 @@ async function restoreSpk() {
   } catch (_) {}
 }
 $('adapt').addEventListener('change', () => saveSetting('adapt', $('adapt').checked));
+$('recall').onchange = () => {
+  recallSec = Number($('recall').value) || 30;
+  saveSetting('recall', recallSec);
+  sys('画面回带窗口：提问时带上最近 ' + recallSec + ' 秒的画面（说话前那段）');
+};
 
 window.addEventListener('load', () => {
   restoreSettings();
