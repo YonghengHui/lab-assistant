@@ -70,6 +70,30 @@ cp lab_context.example.md lab_context.md # 写你自己那门课的设备与实�
   `openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 3650 -subj "/CN=lab" -addext "subjectAltName=IP:192.168.1.10"`
 - 长期跑建议写成 systemd 用户服务（`Restart=always`，`EnvironmentFile=~/.env`，权限 600）。
 
+## 不想架服务器？用**单文件全量版**（`standalone.html`）
+
+把 `standalone.html` 丢到**任意静态托管**（GitHub Pages / Vercel / 对象存储），或本机
+`python3 -m http.server` 后打开——**没有后端、没有安装、不用服务器**，功能却基本是全的：
+
+- **资料库**（在浏览器 IndexedDB 里）：照片 / 视频 / **PDF / Word / PPT** / txt 上传即入库，
+  按「实验」分组，当前组的资料自动进上下文
+  - 照片 → 视觉模型 OCR；PDF → 本地解析文本层（扫描件自动转图让模型读）；
+    Word/PPT → 本地解压提取；视频 → 抽 4 帧 + 把旁白转文字
+- **声纹「只认我的声音」**（可选）：在浏览器里跑 CAM++（与 Python 版 sherpa-onnx **逐位对齐**，实测余弦 0.99999），
+  录 3 段注册；说话提问时不像本人就不发出去
+  - 需要把声纹模型（`campplus_sv_advanced.onnx`，28MB）放在**同目录**（默认取 `./campplus.onnx`），
+    或在设置里填模型 URL；推理库 onnxruntime-web 自动从 CDN 取
+- **多会话历史**、可编辑提示词、**语音播报**（手机自带 TTS，免费）、
+  **联网搜索**（可选，填 Tavily key）、推流帧缓存、全屏 / 缩放
+- 拍一张 / 录一段视频提问（🎬）：**抽帧和旁白转写都在浏览器本地做**，整段视频不上传
+- 数据（资料 / 对话 / 声纹 / API Key）**全部只存在这台设备**，没有服务器经手
+
+**和服务器版差什么**（只剩一样）：**跨设备共享**（手机电脑看同一份资料与历史）——
+那需要一个"公共的家"，也就是服务器。其余功能单文件版都能自己跑。
+
+> ⚠️ 手机要用摄像头必须 **https 或 localhost**（浏览器硬性要求）。用静态托管最省事。
+> 界面语言：中文。用 `file://` 直接打开通常也可以，但部分浏览器会挡摄像头/模块脚本。
+
 ## 换模型 / 换供应商
 
 全部走环境变量（见 `.env.example`）：`LAB_MODEL` 对话主模型、`LAB_OCR_MODEL` 读照片的视觉模型、
@@ -86,6 +110,7 @@ cp lab_context.example.md lab_context.md # 写你自己那门课的设备与实�
 ## Roadmap / 想要什么帮助
 
 - [x] 界面中/英双语（auto 按浏览器语言 + 可切换；加语言＝往 `static/i18n.js` 加一份表）
+- [x] **无服务器单文件版**（`standalone.html`）：资料库 / 多会话 / 语音播报 / 联网搜索全在浏览器里，只有声纹与跨设备依赖服务器
 - [ ] 换其它供应商的开箱支持（OpenAI / Gemini / 本地 Ollama）
 - [ ] 更好的弱网体验（断点续传、离线抽帧）
 - [ ] 一键部署脚本（docker-compose / systemd 模板）
