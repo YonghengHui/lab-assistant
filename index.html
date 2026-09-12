@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>实时语音 · Hermes</title>
+<style>
+  :root {
+    --bg: #0f1117; --card: #1a1d27; --fg: #e8eaf0; --dim: #8b93a7;
+    --accent: #4f8cff; --ok: #34d399; --err: #f87171; --warn: #fbbf24;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font-family: -apple-system, "PingFang SC", "Noto Sans CJK SC", sans-serif;
+    display: flex; flex-direction: column; height: 100dvh; overflow: hidden;
+  }
+  header {
+    padding: 14px 16px; display: flex; align-items: center; gap: 10px;
+    border-bottom: 1px solid #232735; flex-shrink: 0;
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; flex: 1; }
+  #status {
+    font-size: 12px; padding: 4px 10px; border-radius: 999px;
+    background: #232735; color: var(--dim); white-space: nowrap;
+  }
+  #status.on { background: rgba(52,211,153,.15); color: var(--ok); }
+  #status.err { background: rgba(248,113,113,.15); color: var(--err); }
+  #status.work { background: rgba(79,140,255,.15); color: var(--accent); }
+
+  #log {
+    flex: 1; overflow-y: auto; padding: 16px; display: flex;
+    flex-direction: column; gap: 12px; -webkit-overflow-scrolling: touch;
+  }
+  .msg { max-width: 88%; padding: 11px 14px; border-radius: 14px; font-size: 15px; line-height: 1.55; }
+  .user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+  .ai { align-self: flex-start; background: var(--card); border-bottom-left-radius: 4px; }
+  .ai.live { border-left: 2px solid var(--ok); }
+  .sys { align-self: center; font-size: 12px; color: var(--dim); text-align: center; max-width: 100%; }
+
+  footer { padding: 16px; display: flex; flex-direction: column; gap: 12px; align-items: center; flex-shrink: 0; }
+  #orb {
+    width: 88px; height: 88px; border-radius: 50%; border: none; cursor: pointer;
+    background: radial-gradient(circle at 35% 30%, #6ba3ff, #2f6ae0);
+    box-shadow: 0 8px 32px rgba(79,140,255,.4);
+    display: grid; place-items: center; transition: transform .15s, box-shadow .25s;
+    position: relative;
+  }
+  #orb:active { transform: scale(.94); }
+  #orb.live { animation: pulse 1.6s ease-in-out infinite; }
+  #orb.speaking { box-shadow: 0 0 0 8px rgba(52,211,153,.25), 0 8px 32px rgba(52,211,153,.4);
+                  background: radial-gradient(circle at 35% 30%, #6ee7b7, #10b981); }
+  #orb svg { width: 34px; height: 34px; fill: #fff; }
+  @keyframes pulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(79,140,255,.5), 0 8px 32px rgba(79,140,255,.4); }
+    50%     { box-shadow: 0 0 0 14px rgba(79,140,255,0), 0 8px 32px rgba(79,140,255,.4); }
+  }
+  #level { width: 180px; height: 4px; border-radius: 2px; background: #232735; overflow: hidden; }
+  #level i { display: block; height: 100%; width: 0; background: var(--ok); transition: width .08s; }
+  #controls { display: flex; align-items: center; gap: 18px; }
+  #cam {
+    width: 52px; height: 52px; border-radius: 50%; border: 1px solid #2c3143;
+    background: var(--card); display: grid; place-items: center; cursor: pointer;
+  }
+  #cam.on { border-color: var(--ok); background: rgba(52,211,153,.12); }
+  #cam svg { width: 22px; height: 22px; fill: var(--dim); }
+  #cam.on svg { fill: var(--ok); }
+  #preview { width: 120px; border-radius: 10px; border: 1px solid #2c3143; }
+  #hint { font-size: 12px; color: var(--dim); text-align: center; line-height: 1.6; }
+  #stop {
+    position: absolute; top: 14px; right: 16px; font-size: 12px; color: var(--dim);
+    background: none; border: 1px solid #232735; border-radius: 8px; padding: 5px 10px;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>实时语音</h1>
+  <div id="status">未连接</div>
+  <button id="stop" style="display:none">结束</button>
+</header>
+
+<div id="log">
+  <div class="sys">点下方按钮开始说话 · 随时可以打断我</div>
+</div>
+
+<footer>
+  <div id="level"><i></i></div>
+  <div id="controls">
+    <button id="orb" aria-label="开始对话">
+      <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>
+    </button>
+    <button id="cam" aria-label="打开摄像头" style="display:none">
+      <svg viewBox="0 0 24 24"><path d="M20 5h-3.2l-1.2-1.6c-.2-.3-.6-.4-.9-.4H9.3c-.3 0-.7.1-.9.4L7.2 5H4c-1.1 0-2 .9-2 2v11c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm-8 13c-2.8 0-5-2.2-5-5s2.2-5 5-5 5 2.2 5 5-2.2 5-5 5zm0-8c-1.7 0-3 1.3-3 3s1.3 3 3 3 3-1.3 3-3-1.3-3-3-3z"/></svg>
+    </button>
+  </div>
+  <video id="preview" playsinline muted style="display:none"></video>
+  <div id="hint">点一下开始 · 对着手机说话</div>
+</footer>
+
+<script>
+const WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+const SAMPLE_RATE = 24000;
+const CHUNK_MS = 100;
+
+const $ = (id) => document.getElementById(id);
+const logEl = $('log'), orb = $('orb'), statusEl = $('status'), levelEl = $('level').firstElementChild;
+
+let ws = null, audioCtx = null, micStream = null, micNode = null, workletNode = null;
+let playCtx = null, playHead = 0, playing = new Set();
+let running = false, aiBubble = null, userBubble = null;
+let reconnectTimer = null;
+
+const setStatus = (text, cls='') => { statusEl.textContent = text; statusEl.className = cls; };
+const fmtErr = (e) => (e && e.message) ? e.message : String(e);
+
+function addMsg(role, text) {
+  const d = document.createElement('div');
+  d.className = 'msg ' + (role === 'user' ? 'user' : 'ai');
+  d.textContent = text;
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+  return d;
+}
+function addSys(text) {
+  const d = document.createElement('div');
+  d.className = 'sys'; d.textContent = text;
+  logEl.appendChild(d); logEl.scrollTop = logEl.scrollHeight;
+}
+
+/* ---------- 说话检测：交给服务端 semantic_vad ----------
+   官方设计里断句是服务端的事，客户端只管把音频推上去。
+   这里仅保留"用户在说话就打断 AI 播放"这一条本地判断。 */
+let speaking = false;
+const VAD_ON = 1200;          // 本地打断用的音量阈值（int16）
+
+function clientVAD(peak) {
+  if (peak > VAD_ON) {
+    if (!speaking) setStatus('在听…', 'work');
+    speaking = true;
+    if (aiBubble) stopPlayback();     // 用户在说话 → 立刻打断 AI
+  } else {
+    speaking = false;
+  }
+}
+
+/* ---------- 播放：把 PCM16 排队播出去，支持随时清空（打断） ---------- */
+function ensurePlayCtx() {
+  if (!playCtx) playCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (playCtx.state === 'suspended') playCtx.resume();
+  return playCtx;
+}
+function enqueuePCM(int16) {
+  const ctx = ensurePlayCtx();
+  const f32 = new Float32Array(int16.length);
+  for (let i = 0; i < int16.length; i++) f32[i] = int16[i] / 32768;
+  // 服务端固定 24k 输出，播放侧按设备实际采样率重采样
+  const outRate = ctx.sampleRate || 48000;
+  let data = f32;
+  if (outRate !== SAMPLE_RATE) {
+    const len = Math.round(f32.length * outRate / SAMPLE_RATE);
+    data = new Float32Array(len);
+    for (let i = 0; i < len; i++) {
+      const idx = i * SAMPLE_RATE / outRate;
+      const i0 = Math.floor(idx), i1 = Math.min(i0 + 1, f32.length - 1);
+      data[i] = f32[i0] * (1 - (idx - i0)) + f32[i1] * (idx - i0);
+    }
+  }
+  const buf = ctx.createBuffer(1, data.length, outRate);
+  buf.copyToChannel(data, 0);
+  const src = ctx.createBufferSource();
+  src.buffer = buf; src.connect(ctx.destination);
+  const now = ctx.currentTime;
+  const startAt = Math.max(now + 0.02, playHead);
+  src.start(startAt);
+  playHead = startAt + buf.duration;
+  playing.add(src);
+  src.onended = () => {
+    playing.delete(src);
+    if (playing.size === 0) orb.className = '';
+  };
+  orb.className = 'speaking';
+}
+function stopPlayback() {
+  for (const s of playing) { try { s.stop(); } catch (_) {} }
+  playing.clear();
+  if (playCtx) playHead = playCtx.currentTime;
+  orb.className = running ? 'live' : '';
+}
+
+/* ---------- 麦克风：AudioWorklet 取 PCM16 ---------- */
+const WORKLET_CODE = `
+class PCM16 extends AudioWorkletProcessor {
+  constructor() { super(); this.buf = new Int16Array(1280); this.n = 0; }
+  process(inputs) {
+    const ch = inputs[0] && inputs[0][0];
+    if (ch) {
+      for (let i = 0; i < ch.length; i++) {
+        let s = Math.max(-1, Math.min(1, ch[i]));
+        this.buf[this.n++] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        if (this.n === this.buf.length) {
+          this.port.postMessage(this.buf.slice(0));
+          this.n = 0;
+        }
+      }
+    }
+    return true;
+  }
+}
+registerProcessor('pcm16', PCM16);
+`;
+
+async function startMic(ctx) {
+  micStream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true,
+             channelCount: 1 }
+  });
+  const src = ctx.createMediaStreamSource(micStream);
+
+  // 优先 AudioWorklet；老 WebView（Relay App 内置浏览器）不支持，回退 ScriptProcessor
+  let used = 'scriptprocessor';
+  try {
+    if (ctx.audioWorklet && window.AudioWorkletNode) {
+      await ctx.audioWorklet.addModule(URL.createObjectURL(
+        new Blob([WORKLET_CODE], { type: 'application/javascript' })));
+      workletNode = new AudioWorkletNode(ctx, 'pcm16');
+      workletNode.port.onmessage = (ev) => sendPCM(ev.data);
+      const silent = ctx.createGain(); silent.gain.value = 0;
+      src.connect(workletNode); workletNode.connect(silent); silent.connect(ctx.destination);
+      used = 'audioworklet';
+    } else {
+      throw new Error('no AudioWorklet');
+    }
+  } catch (e) {
+    addSys('AudioWorklet 不可用，改用兼容模式（' + fmtErr(e) + '）');
+    const bufSize = 2048;
+    const proc = ctx.createScriptProcessor(bufSize, 1, 1);
+    proc.onaudioprocess = (ev) => {
+      const f32 = ev.inputBuffer.getChannelData(0);
+      const pcm = new Int16Array(f32.length);
+      for (let i = 0; i < f32.length; i++) {
+        const s = Math.max(-1, Math.min(1, f32[i]));
+        pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
+      sendPCM(pcm);
+    };
+    const silent = ctx.createGain(); silent.gain.value = 0;
+    src.connect(proc); proc.connect(silent); silent.connect(ctx.destination);
+    workletNode = proc;
+  }
+  addSys('麦克风已就绪（' + used + ' · ' + ctx.sampleRate + 'Hz）');
+}
+
+/* 统一的音频发送入口：重采样到 24k + 上报音量 */
+let micSampleRate = 24000;
+function sendPCM(pcm) {
+  let peak = 0;
+  for (let i = 0; i < pcm.length; i += 8) peak = Math.max(peak, Math.abs(pcm[i]));
+  levelEl.style.width = Math.min(100, peak / 32768 * 220) + '%';
+  clientVAD(peak);                    // 手动模式：客户端自己判断说完
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const out = micSampleRate === SAMPLE_RATE ? pcm : resample(pcm, micSampleRate, SAMPLE_RATE);
+  ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: b64(out) }));
+}
+function resample(pcm, from, to) {
+  if (from === to) return pcm;
+  const ratio = from / to;
+  const len = Math.round(pcm.length / ratio);
+  const out = new Int16Array(len);
+  for (let i = 0; i < len; i++) {
+    const idx = i * ratio;
+    const i0 = Math.floor(idx), i1 = Math.min(i0 + 1, pcm.length - 1);
+    out[i] = (pcm[i0] * (1 - (idx - i0)) + pcm[i1] * (idx - i0)) | 0;
+  }
+  return out;
+}
+
+function stopMic() {
+  if (workletNode) {
+    try {
+      if (workletNode.port) workletNode.port.onmessage = null;
+      if (workletNode.onaudioprocess !== undefined) workletNode.onaudioprocess = null;
+      workletNode.disconnect();
+    } catch (_) {}
+    workletNode = null;
+  }
+  if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+  levelEl.style.width = '0%';
+}
+
+function b64(int16) {
+  const bytes = new Uint8Array(int16.buffer, int16.byteOffset, int16.byteLength);
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+function fromB64(str) {
+  const bin = atob(str);
+  const out = new Int16Array(bin.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = (bin.charCodeAt(i * 2) | (bin.charCodeAt(i * 2 + 1) << 8)) << 16 >> 16;
+  return out;
+}
+
+/* ---------- WebSocket ---------- */
+function connect() {
+  ws = new WebSocket(WS_URL);
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = async () => {
+    setStatus('已连接', 'on');
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') await audioCtx.resume();
+      micSampleRate = audioCtx.sampleRate || 48000;
+      await startMic(audioCtx);
+      $('cam').style.display = '';   // 连上后显示摄像头按钮
+    } catch (e) {
+      addSys('麦克风不可用：' + fmtErr(e));
+      setStatus('麦克风错误', 'err');
+    }
+    setupSession();
+  };
+
+  ws.onmessage = (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); }
+    catch (e) { addSys('收到无法解析的数据：' + String(ev.data).slice(0, 80)); return; }
+    try { handleEvent(msg); }
+    catch (e) { addSys('处理事件出错 [' + (msg && msg.type) + ']：' + fmtErr(e)); }
+  };
+
+  ws.onclose = () => {
+    setStatus('已断开', 'err');
+    if (running) { addSys('连接断开，正在重连…');
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(() => { if (running) connect(); }, 1500);
+    }
+  };
+  ws.onerror = () => setStatus('连接错误', 'err');
+}
+
+function setupSession() {
+  // 完全按官方模板（help.aliyun.com/zh/model-studio/realtime）：
+  //  - semantic_vad：语义断句，靠"听懂句子说完了没"来切分，而不是固定静音时长
+  //  - audio.input.format.type / sample_rate 嵌套写法（qwen3.5-omni-*-realtime 专用）
+  //  - VAD 由服务端负责 commit，客户端不再手动 commit
+  ws.send(JSON.stringify({
+    type: 'session.update',
+    session: {
+      modalities: ['text', 'audio'],
+      voice: 'Serena',
+      audio: {
+        input:  { format: { type: 'pcm', sample_rate: SAMPLE_RATE } },
+        output: { format: { type: 'pcm', sample_rate: 24000 } }
+      },
+      instructions: '你是 Hermes，一个中文语音助手。回答简洁自然，像真人聊天一样。',
+      turn_detection: {
+        type: 'semantic_vad',
+        threshold: 0.5,
+        silence_duration_ms: 800
+      }
+    }
+  }));
+}
+
+function handleEvent(m) {
+  const t = m.type;
+  switch (t) {
+    case 'session.created':
+    case 'session.updated':
+      setStatus('就绪', 'on'); break;
+
+    case 'input_audio_buffer.speech_started':
+      // 用户在说话 → 打断 AI
+      stopPlayback();
+      if (aiBubble) aiBubble.classList.remove('live');
+      userBubble = addMsg('user', '…');
+      break;
+
+    case 'conversation.item.input_audio_transcription.completed': {
+      const txt = m.transcript || '';
+      if (userBubble) { userBubble.textContent = txt || '(听不清)'; }
+      else if (txt) addMsg('user', txt);
+      userBubble = null;
+      break;
+    }
+
+    case 'response.audio_transcript.delta':
+    case 'response.text.delta': {
+      const d = m.delta || '';
+      if (!aiBubble) { aiBubble = addMsg('ai', ''); aiBubble.classList.add('live'); }
+      aiBubble.textContent += d;
+      logEl.scrollTop = logEl.scrollHeight;
+      break;
+    }
+
+    case 'response.audio.delta':
+      if (m.delta) enqueuePCM(fromB64(m.delta));
+      break;
+
+    case 'response.done':
+      if (aiBubble) { aiBubble.classList.remove('live'); aiBubble = null; }
+      orb.className = running ? 'live' : '';
+      break;
+
+    case 'error':
+      addSys('错误：' + ((m.error && m.error.message) || JSON.stringify(m).slice(0, 200)));
+      break;
+  }
+}
+
+/* ---------- 摄像头：往模型推图片帧（多模态） ---------- */
+let camStream = null, camTimer = null, camCanvas = null;
+let camReady = false;   // 首帧必须在音频之前推 -> 用这个门控
+
+async function startCam() {
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }
+    });
+    const v = $('preview');
+    v.srcObject = camStream;
+    v.style.display = '';
+    await v.play().catch(() => {});
+    $('cam').classList.add('on');
+    camCanvas = document.createElement('canvas');
+    // 先推一帧给模型建立视觉上下文
+    setTimeout(pushFrame, 300);
+    camTimer = setInterval(pushFrame, 1000);   // 官方建议 1 张/秒
+    addSys('摄像头已开启 · 它会看到你拍的东西');
+  } catch (e) {
+    addSys('摄像头不可用：' + fmtErr(e));
+  }
+}
+function stopCam() {
+  clearInterval(camTimer); camTimer = null;
+  if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }
+  const v = $('preview'); v.srcObject = null; v.style.display = 'none';
+  $('cam').classList.remove('on');
+  if (aiBubble) { aiBubble.classList.remove('live'); aiBubble = null; }
+  camReady = false;
+}
+function pushFrame() {
+  if (!camStream || !ws || ws.readyState !== WebSocket.OPEN) return;
+  const v = $('preview');
+  if (!v.videoWidth) return;
+  const w = 640, h = Math.round(v.videoHeight / v.videoWidth * 640);
+  camCanvas.width = w; camCanvas.height = h;
+  camCanvas.getContext('2d').drawImage(v, 0, 0, w, h);
+  // 官方要求：JPG/JPEG、b64 后 <=256KB、480p~1080p、建议 1 张/秒
+  const b64img = camCanvas.toDataURL('image/jpeg', 0.7).split(',')[1];
+  if (b64img.length > 250 * 1024) return;   // 超限跳过这一帧
+  // 关键：实时麦克风一直在推 input_audio_buffer.append，图片夹在中间跟着走，
+  // 由 VAD 自然 commit。自己额外 commit 会和 VAD 抢缓冲区（buffer too small）。
+  ws.send(JSON.stringify({ type: 'input_image_buffer.append', image: b64img }));
+}
+$('cam').onclick = () => { camStream ? stopCam() : startCam(); };
+
+/* ---------- 开始 / 停止 ---------- */
+async function start() {
+  running = true;
+  $('stop').style.display = '';
+  orb.classList.add('live');
+  $('hint').textContent = '正在听 · 直接说话，随时打断我';
+  setStatus('连接中…', 'work');
+  if (!navigator.mediaDevices?.getUserMedia) {
+    addSys('此浏览器不支持麦克风（需要 HTTPS 或 localhost）');
+    setStatus('不支持', 'err'); return;
+  }
+  connect();
+}
+
+function stop() {
+  running = false;
+  clearTimeout(reconnectTimer);
+  stopPlayback(); stopMic(); stopCam();
+  if (ws) { try { ws.close(); } catch (_) {} ws = null; }
+  if (audioCtx) { try { audioCtx.close(); } catch (_) {} audioCtx = null; }
+  orb.className = '';
+  $('stop').style.display = 'none';
+  $('hint').textContent = '点一下开始 · 对着手机说话';
+  setStatus('已停止');
+  addSys('会话结束');
+}
+
+orb.onclick = () => { running ? stop() : start(); };
+$('stop').onclick = stop;
+</script>
+</body>
+</html>
