@@ -12,6 +12,28 @@ walks you through the steps, and reads the answer aloud.
 Self-hosted, single-file backend, runs on a 2C2G VPS. The only external deps are cloud APIs
 (a chat model, an ASR model, a TTS voice).
 
+## 30-second start (no server needed)
+
+Grab [`standalone.html`](standalone.html) — **one file, almost all features**
+(document library / photo Q&A / video Q&A / voiceprint / spoken answers):
+
+1. Put it on any static host (GitHub Pages / Vercel), or serve it locally
+   (`python3 -m http.server 8000`)
+2. Open it → **⚙️ paste one API key** (defaults to Alibaba DashScope; one key covers chat + vision + ASR)
+3. Open it on your phone (**https or localhost required** — browsers block the camera otherwise)
+   → snap a photo or record a clip → just ask
+
+Need cross-device sharing or a shared document library → use the [self-hosted version](#run-it).
+
+## What it costs
+
+Only model API money; a 2C2G box (or your laptop) is enough:
+
+- **See + answer**: a few thousand tokens per question — with a cheap model (e.g. `qwen-plus`)
+  that is **a fraction of a cent**; dozens of questions a day ≈ a coffee per month
+- **Transcription** (video narration / voice input): billed per audio second, tiny
+- **Spoken answers**: the standalone version uses your phone's built-in TTS — **free**
+
 ## Where it is useful
 
 Nothing in the code is tied to a specific school or course — course material lives in an
@@ -39,6 +61,42 @@ external `lab_context.md` plus a runtime document library. The same shell works 
 - Multi-session history, editable system prompt, 4 thinking levels, optional web search, filler lines
 
 There is also a **:8900 realtime page** (full-duplex voice, relaying Qwen-Omni-Realtime): `app.py` + `index.html`.
+
+## No server? Use the standalone build (`standalone.html`)
+
+One file, no backend, no install — drop it on any static host and open it on your phone:
+
+- **Document library** in the browser (IndexedDB): photos / videos / **PDF / Word / PPT** / txt,
+  grouped per experiment; the active group goes into context automatically
+  (photos → vision OCR; PDF → parsed locally, scanned pages rendered for the model;
+  Word/PPT → unzipped locally; video → 4 frames + narration transcript)
+- **Voiceprint "only my voice"** (optional): CAM++ runs *in the browser*, bit-for-bit aligned with
+  the Python sherpa-onnx pipeline (measured cosine 0.99998). Enroll 3 short clips; speech that is
+  not you is refused. Needs `campplus_sv_advanced.onnx` (28MB) next to the HTML as `./campplus.onnx`,
+  or a URL in settings.
+- **Multi-session history**, editable prompt, **spoken answers** (phone TTS), optional web search,
+  fullscreen / zoom, frame buffering
+- Everything (docs, chats, voiceprint, API key) stays **on the device**
+
+**Versus the server version**, only one thing is missing: **cross-device sharing** — that needs a
+shared home, i.e. a server.
+
+## FAQ
+
+**Camera doesn't open?** Browsers require **https or localhost**; `file://` is blocked in some browsers.
+
+**"Auto mode" says the engine failed to load?** It downloads a ~2.9MB inference engine on first use
+(gzipped). On a weak link it fails — **tap it again and it retries** (no reload needed).
+
+**Where does the voiceprint model come from?** By default `./campplus.onnx` next to the HTML
+([CAM++ zh/en general model](https://www.modelscope.cn/models/iic/speech_campplus_sv_zh_en_16k-common_advanced), 28MB).
+
+**Can I use OpenAI / Gemini / a local model?** The API is OpenAI-compatible — change base URL,
+model name and key (in ⚙️ for the standalone build, in `.env` for the server build).
+
+**Is my data uploaded?** Standalone: docs/chats/voiceprint/key stay in your browser; only the
+current question (text + this round's frames) goes to the model API you configured. Same for the
+server build, plus your own box in the middle.
 
 ## Architecture
 
@@ -92,8 +150,29 @@ in `lab_server.py`.
 - [ ] Better weak-network experience (resumable uploads, offline sampling)
 - [ ] One-command deploy (docker-compose / systemd template)
 
-Issues and PRs welcome. If you are a teacher or TA who wants to use this in your own course,
-tell me what is missing.
+## Come hack on it (contributions welcome)
+
+**Status**: it runs and the author uses it daily, but it has **only ever been tested in one course**.
+Help of any kind is welcome — code, bug reports, "I want X", or just telling me where you use it.
+
+**Especially wanted (claim one, or just open an issue saying "I'll do it"):**
+
+- 🔌 **Other providers**: OpenAI / Gemini / local Ollama
+- 🌐 **More languages**: add one table to `static/i18n.js` — a single-commit job
+- 📶 **Weak-network UX**: resumable uploads, auto-retry, offline sampling
+- 📱 **Tablet / landscape** support, screen sharing
+- 🧑🏫 **Real classroom trial**: take it to one lab session and file an issue with
+  "where it was dumb / wrong" — **more valuable than code**
+- 🐛 **Just use it and complain**: device, browser, what broke
+
+**Start here:** [`CONTRIBUTING.md`](CONTRIBUTING.md). Rough contributions are fine — an issue first is fine too.
+
+## Changelog
+
+- **2026-09-12** Standalone build became **feature-complete** (local document library / sessions /
+  TTS / web search / **in-browser voiceprint**); 🎬 record-and-ask video in chat
+- **2026-09-12** Document library supports video; auto-mode VAD loads on demand, gzipped (11MB → 2.9MB)
+- **2026-09-11** Bilingual UI (zh/en); scrubbed public shell
 
 ## License
 
