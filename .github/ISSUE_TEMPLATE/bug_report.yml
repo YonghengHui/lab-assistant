@@ -1,0 +1,34 @@
+name: 🐞 Bug report / 问题反馈
+description: Something broke. 哪里不对了。
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ⚠️ This is an alpha project - thanks for taking the time anyway!
+        感谢反馈。请先确认你用的是最新代码，并把现象说清楚（截图/日志最好）。
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened? / 发生了什么
+      description: What you did, what you expected, what you got. 你做了什么、期望什么、实际看到什么。
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / 日志
+      description: "`journalctl --user -u <unit> -n 50` output, or browser console errors. 服务日志或浏览器报错。"
+      render: shell
+  - type: input
+    id: env
+    attributes:
+      label: Environment / 环境
+      description: "Linux distro, Python version, phone/browser, which model provider. 系统、Python 版本、手机与浏览器、用的哪家模型。"
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting / 提交前确认
+      options:
+        - label: I have NOT pasted any API keys or personal data. / 我没有把 API key 或个人数据贴进来。
+          required: true
