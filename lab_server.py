@@ -696,8 +696,26 @@ def save_prompt():
         log.warning("提示词保存失败: %s", e)
 
 
-def current_prompt() -> str:
-    return _user_prompt if _user_prompt else DEFAULT_PROMPT
+DEFAULT_PROMPT_EN = """You are the teaching assistant for a lab course. The student is standing at the bench with the equipment in front of them; you are watching through the phone camera they are holding and guiding them in real time.
+
+How you work:
+- The student asks out loud (speech-to-text), and the current camera frame (and often the last minutes of footage) is attached. You both see and hear.
+- Their hands are busy and they will not look at the screen; the answer is read aloud. So: short spoken sentences, in order, no tables, no symbol soup, no long code blocks.
+
+Answer structure (follow it):
+1. The first sentence is the conclusion or the action ("turn the power meter to 2 mW") - they can act on that alone.
+2. Then one sentence of why.
+3. For multi-step tasks, say "First... Second...", one sentence per step.
+4. If the picture is unclear, say exactly what you cannot see and ask them to move closer or change the angle. Never guess.
+5. For readings, say which number to read and in which unit.
+
+Constraints: answer in English; keep it short (it gets spoken aloud); when unsure say so; never invent data."""
+
+
+def current_prompt(lang: str = "zh") -> str:
+    if _user_prompt:
+        return _user_prompt
+    return DEFAULT_PROMPT_EN if str(lang).lower().startswith("en") else DEFAULT_PROMPT
 
 
 async def prompt_get(request: web.Request) -> web.Response:
@@ -1292,7 +1310,7 @@ async def ask(request: web.Request) -> web.Response:
     images = payload.get("images") or []
     if image and not images:
         images = [image]
-    images = [i for i in images if i][:3]        # 最多 3 张
+    images = [i for i in images if i][:6]        # 最多 6 张（回带窗口用）
     if len(images) > 1:
         _before = len(images)
         images = _dedupe_frames(images)
@@ -1311,21 +1329,27 @@ async def ask(request: web.Request) -> web.Response:
     history = payload.get("history") or []
 
     if not question and not images:
-        return web.json_response({"error": "没有内容"}, status=400)
+        return web.json_response({"error": "没有内容" if zh else "empty request"}, status=400)
 
     content = []
     if question:
         content.append({"type": "text", "text": question})
     else:
-        content.append({"type": "text", "text": "看看这个，告诉我该怎么做。"})
+        content.append({"type": "text", "text": "看看这个，告诉我该怎么做。" if zh else "Look at this and tell me what to do."})
+    frames_span = int(payload.get("frames_span") or 0)
     if len(images) > 1:
-        content.append({"type": "text", "text": f"（下面按时间顺序给了 {len(images)} 张连续画面" +
-                        ("，摄像头现在已经关了，这是最近拍到的几张"
-                         if stale_sec else "，是我按住麦克风提问过程中的连续截图") +
-                        "，可据此判断我的操作有没有变化）"})
+        if zh:
+            _span = f"，覆盖最近约 {frames_span} 秒" if frames_span else ""
+            _tail = "，摄像头现在已经关了，这是最近拍到的几张" if stale_sec else "，最后一张是提问这一刻，前面几张是我说话前后那段时间的"
+            content.append({"type": "text", "text": f"（下面按时间顺序给了 {len(images)} 张画面{_span}{_tail}，可据此判断我的操作有没有变化）"})
+        else:
+            _span = f", covering roughly the last {frames_span}s" if frames_span else ""
+            _tail = ", the camera is off now - these are the most recent frames" if stale_sec else ", the last one is this moment and the earlier ones are from right before/while I spoke"
+            content.append({"type": "text", "text": f"({len(images)} frames in chronological order{_span}{_tail}; use them to tell whether my operation changed.)"})
     elif images and stale_sec:
-        content.append({"type": "text", "text":
-                        f"（这张画面大约是 {stale_sec} 秒前拍的，摄像头现在已经关了——如果看不清就说看不清，让他重开摄像头）"})
+        content.append({"type": "text", "text": (
+            f"（这张画面大约是 {stale_sec} 秒前拍的，摄像头现在已经关了——如果看不清就说看不清，让他重开摄像头）" if zh else
+            f"(This frame was captured about {stale_sec}s ago and the camera is off now - if it is unclear, say so and ask them to re-enable the camera.)")})
     for im in images:
         content.append({"type": "image_url", "image_url": {"url": im}})
 
@@ -1338,10 +1362,13 @@ async def ask(request: web.Request) -> web.Response:
             search_snippet = await web_search(question)
             search_used = bool(search_snippet)
 
-    msgs = [{"role": "system", "content": current_prompt()}]
+    lang = str(payload.get("lang") or os.environ.get("LAB_LANG") or "zh").lower()
+    zh = not lang.startswith("en")
+    msgs = [{"role": "system", "content": current_prompt(lang)}]
     _docs_ctx = docs_context(payload.get("group"))
     if _docs_ctx:
-        msgs.append({"role": "user", "content": "【实验资料】（请优先依据这些资料回答）\n" + _docs_ctx})
+        msgs.append({"role": "user", "content": ("【实验资料】（请优先依据这些资料回答）\n" if zh else
+                                                 "[Course material] (base your answer on this first)\n") + _docs_ctx})
     _n = _history_limit * 2 if _history_limit else 0
     for h in (history[-_n:] if _n else []):      # 按设定带上最近几轮
         if h.get("role") in ("user", "assistant") and h.get("content"):
@@ -1504,6 +1531,8 @@ def main():
     app.router.add_post("/prompt", prompt_set)
     # 先注册 wasm 的 gzip 直发路由，再挂静态目录（aiohttp 按注册顺序匹配）
     app.router.add_get("/vad/ort-wasm-simd-threaded.wasm", vad_wasm)
+    app.router.add_get("/i18n.js", lambda r: web.FileResponse(HERE / "static" / "i18n.js",
+                                                              headers={"Content-Type": "application/javascript"}))
     app.router.add_static("/vad/", HERE / "static" / "vad")
     load_voiceprint()
     load_docs()
