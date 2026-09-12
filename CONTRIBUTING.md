@@ -1,0 +1,74 @@
+# 一起折腾指南（Contributing）
+
+先说结论：**这里没有门槛** —— 改一行、提个 bug、说一句"我这么用它"都算贡献。
+这是一个学生为自己的实验课做的工具（alpha 状态），作者的期望很简单：**能帮到别人的实验课**。
+
+## 三种参与方式（挑最省事的）
+
+1. **报 bug / 提需求**：开 issue，写清〔设备 / 浏览器〕〔你做了什么〕〔期望什么〕〔实际什么〕
+2. **改代码**：先开个 issue 说一句"我要改 X"，避免撞车；改完直接 PR
+3. **说你用它**：什么课、什么设备、帮没帮上忙 —— 这决定这个项目还要不要继续做
+
+## 跑起来（两种形态，选一个）
+
+**A. 单文件版（第一次上手推荐这个）**
+
+```bash
+# 先把 standalone.html 下载到当前目录
+python3 -m http.server 8000     # 然后打开 http://localhost:8000/standalone.html
+```
+
+→ 点 ⚙️ 填 API Key → 手机/电脑打开（**要 https 或 localhost**，否则摄像头不可用）。
+资料 / 对话 / 声纹全部存在浏览器本地（IndexedDB + localStorage）。
+
+**B. 服务器版**
+
+```bash
+git clone <this-repo> && cd lab-assistant
+python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
+bash scripts/fetch_vad_assets.sh          # 自动挡需要的浏览器端 VAD 资源
+cp .env.example .env && vi .env           # 填 API key
+./venv/bin/python lab_server.py           # 默认 https://0.0.0.0:8901
+```
+
+## 代码结构（哪里改什么）
+
+| 文件 | 作用 |
+|---|---|
+| `standalone.html` | **无服务器单文件版**：全部逻辑在一个 HTML 里（IndexedDB 资料库、本地抽帧、浏览器里跑声纹、语音播报） |
+| `lab_server.py` | 服务器版后端（单文件 aiohttp）：`/ask /stt /tts /docs /frame /video_probe /enroll` … |
+| `lab.html` | 服务器版前端（手机浏览器页面） |
+| `app.py` + `index.html` | `:8900` 实时语音页（Qwen-Omni-Realtime 中转） |
+| `static/i18n.js` | 界面文案；**加一门语言 = 加一份表**（一次提交就能搞定） |
+| `scripts/fetch_vad_assets.sh` | 自动挡（浏览器端 VAD）的资源获取 |
+
+## 提交之前
+
+- **不要提交密钥 / 隐私**：仓库自带的审查脚本可以查一遍
+
+  ```bash
+  python3 scripts/oss_audit.py . --history        # 0 个 BLOCKER 再推
+  python3 scripts/oss_audit.py . --hints "你的真名,你的学校"   # 想更严可以加提示词
+  ```
+
+- **前端改动自测**：起个静态服务 + 无头浏览器把流程跑一遍（这个仓库的改动就是这么验证的），
+  在 PR 里说一句"我怎么验的"即可
+- commit 信息一句话说清**为什么**改，中英文都行
+- 大改动先开 issue 聊一下，别闷头写三天
+
+## 已知的坑（欢迎顺手修）
+
+- 单文件版语音播报用手机自带 TTS：不同浏览器音色差很多，可考虑接 API TTS
+- 声纹阈值默认 `0.62`，是按作者的设备 + 环境调的；换手机可能要微调（设置里可改）
+- 抽帧是均匀抽 4~8 帧：动作太快或视频太长会漏细节（可以做成"变化大就多抽"）
+- 服务器版是轮次问答，延迟 3~9 秒；想要低延迟得接实时语音模型
+- `file://` 直接打开时部分浏览器会拦摄像头/模块脚本 → 用 https 或 localhost
+
+## 作者最想要的四件事
+
+1. **接别的供应商**（OpenAI / Gemini / 本地 Ollama）—— 让没百炼账号的人也能用
+2. **多语言界面** —— 加一份 `static/i18n.js` 表
+3. **真实课堂的试用反馈** —— 哪怕只是一句"我们老师这么用被卡住了"
+4. **弱网优化** —— 学校实验楼的网，懂的都懂
+
+别客气，也不需要写得多漂亮。**能跑起来帮到人，比代码优雅重要。**
