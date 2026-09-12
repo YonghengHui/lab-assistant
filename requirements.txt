@@ -1,0 +1,9 @@
+aiohttp
+websockets
+numpy
+pillow
+edge-tts
+sherpa-onnx
+pymupdf
+python-docx
+python-pptx

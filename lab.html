@@ -1,0 +1,1598 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>实验助手</title>
+<link rel="icon" href="data:,">
+<style>
+  :root{--bg:#0f1117;--card:#1a1d27;--fg:#e8eaf0;--dim:#8b93a7;--accent:#4f8cff;--ok:#34d399;--err:#f87171;--warn:#fbbf24}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--fg);font-family:-apple-system,"PingFang SC","Noto Sans CJK SC",sans-serif;
+       display:flex;flex-direction:column;height:100dvh;overflow:hidden}
+
+  header{padding:10px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0}
+  header h1{font-size:15px;margin:0;font-weight:600;flex:1}
+  #menu{background:none;border:none;color:var(--fg);font-size:19px;padding:0 4px;line-height:1}
+
+  /* 历史会话抽屉 */
+  #drawer{position:fixed;top:0;left:0;bottom:0;width:76%;max-width:320px;background:#151823;
+          border-right:1px solid #232735;transform:translateX(-102%);transition:transform .22s;
+          z-index:50;display:flex;flex-direction:column}
+  #drawer.open{transform:translateX(0)}
+  #scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;z-index:49}
+  #scrim.open{display:block}
+  .dhead{display:flex;gap:8px;padding:12px;border-bottom:1px solid #232735;align-items:center}
+  #newchat{flex:1;background:var(--accent);color:#fff;border:none;border-radius:9px;
+           padding:10px;font-size:13.5px;font-family:inherit;font-weight:600}
+  #closedrawer{background:none;border:1px solid #2c3143;color:var(--dim);border-radius:9px;
+               padding:9px 12px;font-size:13px;font-family:inherit}
+  #sesslist{flex:1;overflow-y:auto;padding:8px}
+  .sess{padding:10px 12px;border-radius:9px;font-size:13.5px;color:var(--fg);
+        display:flex;align-items:center;gap:8px;cursor:pointer}
+  .sess:hover,.sess.act{background:#232735}
+  .sess .t{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sess .n{font-size:11px;color:var(--dim)}
+  .sess .del{background:none;border:none;color:var(--dim);font-size:14px;padding:2px 4px}
+  .sess .del:hover{color:var(--err)}
+
+  /* 通用面板（资料 / 提示词） */
+  .panel{position:fixed;left:0;right:0;bottom:0;max-height:78dvh;background:#151823;
+         border-top:1px solid #232735;border-radius:16px 16px 0 0;z-index:60;
+         transform:translateY(102%);transition:transform .22s;display:flex;flex-direction:column}
+  .panel.open{transform:translateY(0)}
+  .pbody{padding:12px 14px 18px;overflow-y:auto}
+  .panel .dhead{border-bottom:1px solid #232735}
+  #pickdoc{width:100%;background:var(--accent);color:#fff;border:none;border-radius:10px;
+           padding:12px;font-size:14px;font-family:inherit;font-weight:600}
+  .grow{display:flex;gap:8px;align-items:center;margin-bottom:10px;font-size:13px;color:var(--dim)}
+  .grow select{flex:1;background:var(--card);border:1px solid #2c3143;color:var(--fg);
+               border-radius:9px;padding:9px;font-family:inherit;font-size:13px;outline:none;min-width:0}
+  #newgroup{background:var(--card);border:1px solid #2c3143;color:var(--dim);border-radius:9px;
+            padding:9px 11px;font-family:inherit;font-size:12.5px;white-space:nowrap}
+  .glab{font-size:12.5px;color:var(--dim);align-self:center}
+  #histsel,#histcustom{background:var(--card);border:1px solid #2c3143;color:var(--fg);
+        border-radius:9px;padding:7px 8px;font-family:inherit;font-size:12.5px;outline:none}
+  #histcustom{width:76px}
+  .gsep{font-size:11.5px;color:var(--dim);margin:12px 2px 6px}
+  .docrow{display:flex;align-items:center;gap:8px;padding:9px 10px;background:var(--card);
+          border-radius:9px;margin-bottom:7px;font-size:13px}
+  .docrow .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .docrow .c{font-size:11px;color:var(--dim)}
+  .docrow .x{background:none;border:none;color:var(--dim);font-size:14px;padding:2px 5px}
+  .docrow .x:hover{color:var(--err)}
+  .docrow .eye{background:none;border:none;color:var(--accent);font-size:13px;padding:2px 5px}
+  /* 资料预览 */
+  #docview{position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:90;display:none;flex-direction:column;padding:14px}
+  #docview.open{display:flex}
+  #docview .dvhead{display:flex;align-items:center;gap:8px;padding:2px 0 10px;flex-shrink:0}
+  #docview .dvhead strong{flex:1;font-size:13.5px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #docview .dvhead button{background:none;border:none;color:var(--fg);font-size:19px;padding:2px 6px}
+  #docview pre{flex:1;overflow:auto;background:#151823;border:1px solid #2c3143;border-radius:12px;
+               padding:12px;font-size:13px;line-height:1.8;color:var(--fg);margin:0;
+               white-space:pre-wrap;word-break:break-word;-webkit-overflow-scrolling:touch;
+               font-family:inherit}
+  #prompttext{width:100%;height:46dvh;background:var(--card);border:1px solid #2c3143;
+              border-radius:10px;color:var(--fg);font-size:13px;line-height:1.6;
+              padding:11px;font-family:ui-monospace,Menlo,monospace;resize:vertical;outline:none}
+  .prow{display:flex;gap:9px;margin-top:10px}
+  .prow button{flex:1;background:var(--accent);color:#fff;border:none;border-radius:9px;
+               padding:11px;font-size:13.5px;font-family:inherit;font-weight:600}
+  #promptreset{background:var(--card);color:var(--dim);border:1px solid #2c3143}
+  .hint{font-size:11.5px;color:var(--dim);line-height:1.7;margin-top:9px}
+  #st{font-size:12px;padding:4px 10px;border-radius:999px;background:#232735;color:var(--dim);white-space:nowrap}
+  #st.on{background:rgba(52,211,153,.15);color:var(--ok)}
+  #st.err{background:rgba(248,113,113,.15);color:var(--err)}
+  #st.work{background:rgba(79,140,255,.15);color:var(--accent)}
+
+  #bar{display:flex;gap:7px;padding:0 12px 8px;flex-shrink:0;align-items:center;
+       overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch}
+  #bar::-webkit-scrollbar{display:none}
+  #bar2{display:flex;gap:7px;padding:0 12px 8px;flex-shrink:0;align-items:center;flex-wrap:wrap}
+  #bar2.collapsed{display:none}
+  #more{background:var(--card);border:1px solid #2c3143;color:var(--fg);border-radius:9px;
+        padding:7px 12px;font-size:15px;font-family:inherit;line-height:1;flex-shrink:0}
+  #more.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .tog{display:flex;background:var(--card);border-radius:9px;overflow:hidden;border:1px solid #2c3143}
+  .tog button{background:none;border:none;color:var(--dim);font-size:12.5px;padding:7px 12px;font-family:inherit}
+  .tog button.act{background:var(--accent);color:#fff}
+  select{background:var(--card);border:1px solid #2c3143;color:var(--fg);font-size:12.5px;
+         border-radius:9px;padding:7px 8px;font-family:inherit;outline:none}
+  #enroll,#scorem,#adaptreset,#mute,#websearch,#filler,#upload,#promptbtn{background:var(--card);border:1px solid #2c3143;color:var(--dim);font-size:12.5px;
+          border-radius:9px;padding:7px 11px;font-family:inherit}
+  #enroll.rec,#scorem.rec,#mute.rec{background:var(--err);color:#fff;border-color:var(--err)}
+  #adaptlab{display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--dim);
+            background:var(--card);border:1px solid #2c3143;border-radius:9px;padding:6px 9px}
+  #adaptlab input{accent-color:var(--accent);margin:0}
+
+  #log{flex:1;overflow-y:auto;padding:0 14px 14px;display:flex;flex-direction:column;gap:12px}
+  .m{max-width:90%;padding:11px 14px;border-radius:14px;font-size:15px;line-height:1.65;white-space:pre-wrap;word-break:break-word}
+  .me{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:4px}
+  .ai{align-self:flex-start;background:var(--card);border-bottom-left-radius:4px}
+  .sys{align-self:center;font-size:12px;color:var(--dim);text-align:center}
+
+  footer{padding:10px 12px 14px;display:flex;gap:10px;align-items:center;flex-shrink:0;border-top:1px solid #232735}
+  #shot,#send{width:46px;height:46px;border-radius:50%;border:none;display:grid;place-items:center;flex-shrink:0}
+  #shot{background:var(--card);border:1px solid #2c3143}
+  #send{background:var(--accent)}
+  #send:disabled{opacity:.4}
+  #send svg{width:22px;height:22px;fill:#fff}
+  #shot svg{width:22px;height:22px;fill:var(--dim)}
+  #shot.on{border-color:var(--ok)} #shot.on svg{fill:var(--ok)}
+  #mic{width:54px;height:54px;border-radius:50%;border:none;background:var(--accent);
+       display:grid;place-items:center;flex-shrink:0;position:relative;transition:background .2s}
+  #mic svg{width:23px;height:23px;fill:#fff}
+  #mic:active{transform:scale(.94)}
+  #mic.rec{background:var(--err);animation:pulse 1.1s infinite}
+  #mic.wait{background:var(--warn)}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(248,113,113,.6)}50%{box-shadow:0 0 0 12px rgba(248,113,113,0)}}
+  #q{flex:1;background:var(--card);border:1px solid #2c3143;border-radius:22px;padding:13px 16px;
+     color:var(--fg);font-size:15px;outline:none;min-width:0}
+  #q::placeholder{color:var(--dim)}
+  #thumb{position:fixed;bottom:88px;left:12px;width:84px;border-radius:10px;border:2px solid var(--accent);display:none;background:#000}
+  /* 全屏预览：点一下预览画面（或点 ⛶）进全屏，方便对准小元件 */
+  #thumb:fullscreen{width:100vw;height:100vh;object-fit:contain;border:0;border-radius:0;
+                    bottom:auto;left:auto;background:#000}
+  #camctl{position:fixed;bottom:88px;left:100px;display:none;flex-direction:column;gap:6px;z-index:5}
+  #camctl button{padding:4px 8px;font-size:12px;border-radius:8px;border:1px solid #2c3143;
+                 background:#151823;color:var(--dim)}
+  #camctl button.on{border-color:var(--accent);color:#fff}
+  #meter{position:fixed;bottom:104px;right:14px;width:6px;height:92px;border-radius:3px;background:#232735;
+         overflow:hidden;display:none}
+  #meter i{position:absolute;bottom:0;left:0;right:0;height:0;background:var(--ok)}
+</style>
+</head>
+<body>
+<header>
+  <button id="menu" aria-label="历史会话">☰</button>
+  <h1>实验助手</h1>
+  <div id="st">就绪</div>
+</header>
+
+<div id="drawer">
+  <div class="dhead">
+    <button id="newchat">＋ 新对话</button>
+    <button id="closedrawer">✕</button>
+  </div>
+  <div id="sesslist"></div>
+</div>
+<div id="scrim"></div>
+
+<!-- 资料面板 -->
+<div id="docpanel" class="panel">
+  <div class="dhead">
+    <strong style="flex:1;font-size:14px">实验资料</strong>
+    <button id="docclose">✕</button>
+  </div>
+  <div class="pbody">
+    <div class="grow">
+      <label>当前实验：</label>
+      <select id="docgroup"></select>
+      <button id="newgroup">＋新实验</button>
+    </div>
+    <button id="pickdoc">＋ 加资料（照片 / 视频 / PDF / Word / PPT）</button>
+    <div id="doclist" style="margin-top:10px"></div>
+    <div class="hint">一次实验一组。只有「当前实验」的资料会喂给模型，避免混淆。<br>
+      <b>纸质指导书拍照就能上传</b>（自动 OCR 成文字）；多页可以一次选多张。<br>
+      <b>录一段视频也能传</b>：自动抽 8 帧看画面，<b>并把你视频里的旁白转成文字</b>——一边拍一边说最省事。</div>
+  </div>
+</div>
+
+<!-- 提示词面板 -->
+<div id="promptpanel" class="panel">
+  <div class="dhead">
+    <strong style="flex:1;font-size:14px">系统提示词</strong>
+    <button id="promptclose">✕</button>
+  </div>
+  <div class="pbody">
+    <textarea id="prompttext" spellcheck="false"></textarea>
+    <div class="prow">
+      <button id="promptsave">保存</button>
+      <button id="promptreset">恢复默认</button>
+    </div>
+    <div class="hint">这里决定它"是谁、怎么回答"。改完立刻生效（新的一轮问答）。</div>
+  </div>
+</div>
+
+<input type="file" id="docfile" accept=".pdf,.docx,.pptx,.txt,.md,.csv,image/*,video/*" multiple style="display:none">
+<!-- 对话里直接拍/选一段视频提问（不进资料库） -->
+<input type="file" id="vfile" accept="video/*" capture="environment" style="display:none">
+
+<!-- 资料内容预览 -->
+<div id="docview">
+  <div class="dvhead">
+    <strong id="dvname"></strong>
+    <button id="dvclose">✕</button>
+  </div>
+  <pre id="dvtext"></pre>
+</div>
+
+<div id="bar">
+  <div class="tog" id="mode">
+    <button data-m="manual">手动挡</button>
+    <button data-m="auto">自动挡</button>
+  </div>
+  <select id="think" title="思考深度">
+    <option value="none" selected>思考：无</option>
+    <option value="low">思考：低</option>
+    <option value="high">思考：高</option>
+    <option value="max">思考：满</option>
+  </select>
+  <button id="more" title="更多设置">⋯</button>
+</div>
+<div id="bar2" class="collapsed">
+  <select id="spk" title="声纹识别">
+    <option value="off" selected>声纹：关</option>
+    <option value="on">声纹：只认我</option>
+  </select>
+  <select id="sens" title="声纹灵敏度">
+    <option value="0.55">宽松</option>
+    <option value="0.62" selected>标准</option>
+    <option value="0.70">严格</option>
+  </select>
+  <button id="enroll" title="录 3 段你的声音作为声纹">录声纹</button>
+  <button id="scorem" title="录一句，看看当前分数">测分数</button>
+  <button id="mute" title="暂停/恢复麦克风">🎤 在听</button>
+  <button id="vidbtn" title="视频开关：开着按 1 帧/秒抽帧（画面没变自动跳过），提问时带上最近画面">🎥 视频：开</button>
+  <button id="upload" title="实验资料（照片/PDF/Word/PPT）">📎 资料</button>
+  <button id="promptbtn" title="编辑系统提示词">⚙ 提示词</button>
+  <button id="websearch" title="联网搜索">🌐 联网：开</button>
+  <button id="screenbtn" title="共享屏幕（电脑 Chrome 最好用）：共享期间提问/推流都用屏幕画面">🖥 投屏：关</button>
+  <button id="filler" title="垫场话：回答前先说一句">💬 垫场：开</button>
+  <label id="adaptlab" title="声纹自适应微调">
+    <input type="checkbox" id="adapt" checked> 自适应
+  </label>
+  <button id="adaptreset" title="声纹退回注册状态">重置声纹</button>
+  <span class="glab">上下文</span>
+  <select id="histsel" title="带几轮历史给模型">
+    <option value="0">0 轮</option>
+    <option value="2">2 轮</option>
+    <option value="4">4 轮</option>
+    <option value="6" selected>6 轮</option>
+    <option value="12">12 轮</option>
+    <option value="20">20 轮</option>
+    <option value="custom">自定义…</option>
+  </select>
+  <input id="histcustom" type="number" min="0" max="60" placeholder="轮数" style="display:none">
+</div>
+
+<div id="log">
+  <div class="sys">摄像头自动开 · 直接说话提问</div>
+</div>
+
+<video id="thumb" playsinline webkit-playsinline muted autoplay></video>
+<div id="camctl">
+  <button data-z="1" class="on">1×</button>
+  <button data-z="2">2×</button>
+  <button data-z="3">3×</button>
+  <button id="fullbtn" title="全屏看画面（对准小元件）">⛶</button>
+</div>
+<div id="meter"><i></i></div>
+
+<footer>
+  <button id="shot" aria-label="开关摄像头">
+    <svg viewBox="0 0 24 24"><path d="M20 5h-3.2l-1.2-1.6c-.2-.3-.6-.4-.9-.4H9.3c-.3 0-.7.1-.9.4L7.2 5H4c-1.1 0-2 .9-2 2v11c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm-8 13c-2.8 0-5-2.2-5-5s2.2-5 5-5 5 2.2 5 5-2.2 5-5 5z"/></svg>
+  </button>
+  <button id="mic" aria-label="说话">
+    <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>
+  </button>
+  <input id="q" placeholder="说话或打字…（空着发=发画面）">
+  <button id="vidask" aria-label="拍一段视频提问" title="拍一段视频提问：边拍边说，它看画面+听你说">🎬</button>
+  <button id="send" aria-label="发送">
+    <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+  </button>
+</footer>
+
+  <!-- VAD（自动挡）的库改成按需加载：手机信号差时不再一进页面就卡在下载 400KB+11MB -->
+<script>
+const $ = (id) => document.getElementById(id);
+const logEl = $('log'), st = $('st');
+let camStream = null, camCanvas = null;
+let chatHistory = [];
+let lastQuestion = '', lastAnswer = '';
+let turnFrames = [];
+let thinking = 'none';
+let mode = 'manual';              // manual | auto
+
+/* ================= 设置持久化（关掉页面再进来保持上次配置） ================= */
+const SET_KEY = 'lab_settings_v1';
+function savedSettings() {
+  try { return JSON.parse(localStorage.getItem(SET_KEY) || '{}'); } catch (_) { return {}; }
+}
+function saveSetting(k, v) {
+  try { const s = savedSettings(); s[k] = v; localStorage.setItem(SET_KEY, JSON.stringify(s)); } catch (_) {}
+}
+
+function say(role, text) {
+  const d = document.createElement('div');
+  d.className = 'm ' + role; d.textContent = text;
+  logEl.appendChild(d); logEl.scrollTop = logEl.scrollHeight;
+  return d;
+}
+function sys(t) { const d=document.createElement('div'); d.className='sys'; d.textContent=t;
+                  logEl.appendChild(d); logEl.scrollTop=logEl.scrollHeight; }
+function setSt(t, cls='') { st.textContent = t; st.className = cls; }
+
+/* ================= 摄像头 =================
+   坑（查证过）：同一个 MediaStream 挂到两个 <video> 上，第二个会黑屏。
+   所以只用一个 video 元素（就是可见的预览窗），抓帧也从它抓。 */
+let camReady = false;
+let zoom = 1, nativeZoom = false;      // 缩放：优先用镜头原生 zoom，不支持就裁切画面中心
+
+async function openCam() {
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({
+      // 分辨率别要太大：安卓 WebView 上过大可能忽略 facingMode / 导致黑屏
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    const v = $('thumb');
+    v.srcObject = camStream;
+    v.muted = true;
+    v.setAttribute('playsinline', '');
+    v.style.display = 'block';
+
+    // 必须等元数据就绪再 play，否则 drawImage 会得到黑帧
+    await new Promise((res) => {
+      if (v.readyState >= 1) return res();
+      v.onloadedmetadata = () => res();
+      setTimeout(res, 2500);                 // 兜底，别卡死
+    });
+    await v.play().catch(() => {});
+    await new Promise((res) => {
+      if (v.readyState >= 2) return res();
+      v.oncanplay = () => res();
+      setTimeout(res, 2500);
+    });
+
+    camCanvas = document.createElement('canvas');
+    camReady = v.videoWidth > 0;
+    $('shot').classList.add('on');
+    $('camctl').style.display = 'flex';
+    if (zoom !== 1) applyZoom(zoom);       // 重新打开摄像头后把缩放恢复回去
+    sys('摄像头已就绪' + (camReady ? `（${v.videoWidth}×${v.videoHeight}）` : '（画面未就绪，稍等）') +
+        '　点画面或 ⛶ 可全屏，1×/2×/3× 可放大');
+  } catch (e) {
+    const em = String((e && e.message) || e || '');
+    sys('摄像头打不开' + (/not found|NotFound/i.test(em) ? '：没找到可用摄像头' :
+        /permission|denied/i.test(em) ? '：没有摄像头权限，请在浏览器地址栏授权' :
+        '：' + em) + '（语音和打字仍可用）');
+  }
+}
+
+function captureFrame() {
+  const v = activeVideo();
+  if (!v || !camCanvas || !v.videoWidth || v.readyState < 2) return null;
+  // 缩放：镜头支持原生 zoom 时画面本身就放大了；否则裁画面中心再放大
+  const z = nativeZoom ? 1 : zoom;
+  const sw = v.videoWidth / z, sh = v.videoHeight / z;
+  const sx = (v.videoWidth - sw) / 2, sy = (v.videoHeight - sh) / 2;
+  const w = 1024, h = Math.round(sh / sw * 1024);
+  camCanvas.width = w; camCanvas.height = h;
+  try {
+    camCanvas.getContext('2d').drawImage(v, sx, sy, sw, sh, 0, 0, w, h);
+    return camCanvas.toDataURL('image/jpeg', 0.72);
+  } catch (e) { return null; }
+}
+
+/* ================= 缩放 / 全屏 ================= */
+async function applyZoom(z) {
+  zoom = z;
+  saveSetting('zoom', z);
+  nativeZoom = false;
+  const t = camStream && camStream.getVideoTracks ? camStream.getVideoTracks()[0] : null;
+  if (t && t.getCapabilities) {
+    try {
+      const cap = t.getCapabilities();
+      if (cap && cap.zoom) {
+        const v = Math.min(cap.zoom.max, Math.max(cap.zoom.min, z));
+        await t.applyConstraints({ advanced: [{ zoom: v }] });
+        nativeZoom = true;
+      }
+    } catch (_) { nativeZoom = false; }
+  }
+  const v = $('thumb');
+  v.style.transform = nativeZoom ? '' : `scale(${z})`;
+  document.querySelectorAll('#camctl button[data-z]').forEach(b =>
+    b.classList.toggle('on', Number(b.dataset.z) === z));
+  sys(`缩放 ${z}×（${nativeZoom ? '镜头原生' : '裁切放大'}）——发出去的画面就是放大后的`);
+}
+document.querySelectorAll('#camctl button[data-z]').forEach(b => {
+  b.onclick = () => applyZoom(Number(b.dataset.z));
+});
+function toggleFull() {
+  const v = $('thumb');
+  if (document.fullscreenElement) { document.exitFullscreen(); return; }
+  (v.requestFullscreen || v.webkitRequestFullscreen || (() => {})).call(v);
+}
+$('fullbtn').onclick = toggleFull;
+$('thumb').onclick = toggleFull;
+
+function closeCam() {
+  if (camStream) { camStream.getTracks().forEach(t=>t.stop()); camStream=null; }
+  const v = $('thumb');
+  try { v.srcObject = null; } catch (_) {}
+  v.style.display = 'none';
+  v.style.transform = '';
+  $('shot').classList.remove('on');
+  const c = $('camctl'); if (c) c.style.display = 'none';
+  camReady = false;
+}
+$('shot').onclick = () => setVid(!vidOn);
+
+/* ================= 视频开关：开着就按 1 帧/秒推给助手（画面没变就跳过） =================
+   开关那段时间持续抽帧上传（服务器只缓存、不调模型 = 零成本），
+   提问时不管语音还是打字都自动用最近几帧当画面。 */
+let vidOn = true, feedTimer = null, feedCanvas = null, sigCanvas = null, lastSig = null;
+let lastFrames = [], lastFrameTs = 0;   // 最近拍到的几帧：摄像头关了也留着，提问时照发
+const FEED_MS = 1000;                   // 官方口径：视频帧最多/建议 1 帧每秒（Gemini Live、千问 Omni-Realtime）
+const FEED_SIDE = 720;                  // 推流帧长边（上传小、够看设备与读数）
+
+function feedFrame() {                    // 小图省流量
+  const v = activeVideo();
+  if (!v || !v.videoWidth || v.readyState < 2) return null;
+  feedCanvas = feedCanvas || document.createElement('canvas');
+  const z = nativeZoom ? 1 : zoom;       // 和 captureFrame 一样带上缩放
+  const sw = v.videoWidth / z, sh = v.videoHeight / z;
+  const sx = (v.videoWidth - sw) / 2, sy = (v.videoHeight - sh) / 2;
+  const w = FEED_SIDE, h = Math.round(sh / sw * FEED_SIDE);
+  feedCanvas.width = w; feedCanvas.height = h;
+  try {
+    feedCanvas.getContext('2d').drawImage(v, sx, sy, sw, sh, 0, 0, w, h);
+    return feedCanvas.toDataURL('image/jpeg', 0.55);
+  } catch (_) { return null; }
+}
+
+/* 画面指纹：16×16 灰度。画面没变就不上传（静置时几乎零流量，动起来才按 1 帧/秒发） */
+function frameSig() {
+  const v = activeVideo();
+  sigCanvas = sigCanvas || document.createElement('canvas');
+  sigCanvas.width = 16; sigCanvas.height = 16;
+  try {
+    const c = sigCanvas.getContext('2d');
+    c.drawImage(v, 0, 0, 16, 16);
+    return c.getImageData(0, 0, 16, 16).data;
+  } catch (_) { return null; }
+}
+function sigDiff(a, b) {
+  if (!a || !b) return 999;
+  let s = 0;
+  for (let i = 0; i < a.length; i += 4) s += Math.abs(a[i] - b[i]);
+  return s / (a.length / 4);
+}
+
+async function pushFrame() {
+  if (!vidOn || !camStream) return;
+  const sig = frameSig();
+  if (sigDiff(sig, lastSig) < 5) return;        // 和上一帧几乎一样 → 不发，省流量
+  const f = feedFrame();
+  if (!f) return;
+  lastSig = sig;
+  rememberFrame(f);
+  try {
+    await fetch('/frame', { method:'POST', headers:{'Content-Type':'application/json'},
+                            body: JSON.stringify({ image: f }) });
+  } catch (_) {}
+}
+
+/* 记住最近几帧：摄像头关掉之后提问仍然带上（用户明确要求） */
+function rememberFrame(f) {
+  if (!f) return;
+  lastFrames.push(f);
+  if (lastFrames.length > 3) lastFrames.shift();
+  lastFrameTs = Date.now();
+}
+
+function startFeed() {
+  clearInterval(feedTimer);
+  pushFrame();
+  feedTimer = setInterval(pushFrame, FEED_MS);
+}
+function stopFeed() { clearInterval(feedTimer); feedTimer = null; }
+
+function setVid(on) {
+  vidOn = !!on;
+  saveSetting('vid', vidOn);
+  const b = $('vidbtn');
+  if (b) { b.textContent = vidOn ? '🎥 视频：开' : '🎥 视频：关'; b.classList.toggle('on', vidOn); }
+  if (vidOn) {
+    openCam().then(() => { startFeed(); sys(`视频已开：1 帧/秒（画面没变就不发，省流量；提问时自动带上）`); });
+  } else {
+    stopFeed(); closeCam(); sys('视频已关：提问不带画面（再点一下「🎥 视频：关」就开回来）');
+  }
+}
+$('vidbtn').onclick = () => setVid(!vidOn);
+
+/* 问答前保证摄像头活着：没开就开，最多等 1.5 秒让它出画面 —— 否则这轮不带画面，
+   模型只能凭瞎猜，学生还以为"它不理我" */
+async function ensureCam() {
+  if (!camStream) {
+    if (!vidOn) return;                  // 用户把视频关了就别自作主张开回来
+    try { await openCam(); } catch (_) {}
+  }
+  const v = $('thumb');
+  for (let i = 0; i < 10 && (!v.videoWidth || v.readyState < 2); i++) {
+    await new Promise(r => setTimeout(r, 150));
+  }
+}
+
+/* ================= 抓帧：说话期间每秒一张（最多 5 张） ================= */
+let frameTimer = null;
+function startFrames() {
+  turnFrames = [];
+  const f = captureFrame(); if (f) turnFrames.push(f);
+  clearInterval(frameTimer);
+  frameTimer = setInterval(() => {
+    const g = captureFrame();
+    if (g && turnFrames.length < 5) turnFrames.push(g);
+  }, 1000);
+}
+function stopFrames() {
+  clearInterval(frameTimer); frameTimer = null;
+  const f = captureFrame();
+  if (f && turnFrames.length < 5) turnFrames.push(f);
+}
+
+/* ================= 提问（文本各自答完；语音同一时刻只播一路） ================= */
+const audioSet = new Set();                // 所有在播的音频
+let audioResolve = null;
+let activeSpeaker = null;                  // 当前"正在发声"的那一轮 id
+
+function playAudio(b64, turnId) {
+  return new Promise((res) => {
+    let a;
+    try { a = new Audio('data:audio/mp3;base64,' + b64); }
+    catch (_) { return res(); }
+    audioSet.add(a);
+    audioResolve = res;
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      audioSet.delete(a);
+      if (audioResolve === res) audioResolve = null;
+      if (activeSpeaker === turnId) activeSpeaker = null;
+      res();
+    };
+    a.onended = done;
+    a.onerror = done;
+    a.play().catch(done);
+  });
+}
+
+/* 掐掉所有正在播的音频（保证同一时刻只有一路声音） */
+function stopAllAudio() {
+  for (const a of Array.from(audioSet)) {
+    try { a.pause(); a.currentTime = 0; } catch (_) {}
+  }
+  audioSet.clear();
+  if (audioResolve) { const r = audioResolve; audioResolve = null; r(); }
+  activeSpeaker = null;
+}
+const stopAudio = stopAllAudio;
+
+let turnSeq = 0;
+const askQueue = [];                       // 语音播放队列（文本不经队列，各自答完）
+let playing = false;
+let fillerOn = true;                       // 垫场话开关
+let fillerAudio = null;                    // 正在播的垫场音频
+
+/* 垫场话：主模型还在想时先秒答一句，避免"问完没反应" */
+async function fillerFetch(q, myTurn) {
+  if (!fillerOn) return;
+  try {
+    const kind = /参数|规格|型号|价格|官网|手册|查一下|搜一下|最新/.test(q) ? 'search' : 'think';
+    const r = await fetch('/quick_ack', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind })
+    });
+    const d = await r.json();
+    if (!d.audio) return;
+    // 如果真正的回答已经回来了，就别播垫场话
+    if (myTurn !== turnSeq) return;
+    askQueue.push({ id: myTurn, b64: d.audio, filler: true });
+    speakQueueWorker();
+  } catch (_) {}
+}
+
+/* 播放队列：一轮一轮播，新的要播就掐掉旧的（语音不叠） */
+async function speakQueueWorker() {
+  if (playing) return;
+  playing = true;
+  while (askQueue.length) {
+    const job = askQueue.shift();
+    if (job.cancelled) continue;
+    activeSpeaker = job.id;
+    await playAudio(job.b64, job.id);
+  }
+  playing = false;
+}
+
+async function ask(text, opts) {
+  const o = opts || {};
+  const q = (text || '').trim();
+  const imgOnly = !!o.imgOnly;
+  if (!q && !imgOnly && !(o.images && o.images.length)) return;
+
+  const myTurn = ++turnSeq;
+  await ensureCam();
+  let imgs;
+  if (o.images && o.images.length) {
+    imgs = o.images.slice(0, 6);            // 视频抽的帧（最多 6 张）
+  } else {
+    imgs = turnFrames.length ? turnFrames.slice() : (camStream ? [captureFrame()].filter(Boolean) : []);
+  }
+  let staleSec = 0;
+  if (!o.images || !o.images.length) {
+    if (imgs.length) {
+      imgs.forEach(rememberFrame);
+    } else if (lastFrames.length) {           // 摄像头已关：把最后拍到的几张发过去
+      imgs = lastFrames.slice(-3);
+      staleSec = Math.max(0, Math.round((Date.now() - lastFrameTs) / 1000));
+    }
+  }
+  if (!q && !imgs.length && !o.videoTranscript) { sys('没有内容发不出去'); return; }
+  const qHist = (o.isVideo ? '🎬［视频］ ' : '') + (q || (o.videoTranscript ? '（看这段视频）' : '（看这个画面）'));
+  say('me', qHist);
+  sys(imgs.length
+      ? (staleSec ? `📷 摄像头已关，用 ${staleSec} 秒前拍下的 ${imgs.length} 张画面` : `📷 已带上 ${imgs.length} 张画面`)
+      : '⚠️ 这轮没带画面（点左下相机图标开启）');
+  setSt('思考中…', 'work');
+  const aiBubble = say('ai', '…');
+
+  // 视频里的旁白拼进问题里（他自己说的，往往比画面更说明问题）
+  let qFull = q;
+  if (o.videoTranscript) {
+    qFull = (q ? q + '\n\n' : '') + '【我拍视频时说的话】\n' + o.videoTranscript;
+  }
+
+  // 延迟优化：先把面前这轮的话打断，然后立刻"嗯，我看一下"顶上
+  stopAllAudio();
+  askQueue.length = 0;
+  fillerFetch(q, myTurn);
+
+  try {
+    const r = await fetch('/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: qFull, images: imgs, history: chatHistory, reasoning: thinking,
+                             search: useSearch, stale_sec: staleSec })
+    });
+    const d = await r.json();
+    // 文本照常答完，不打断、不标记
+    if (d.error) { aiBubble.textContent = '出错了：' + d.error; setSt('错误','err'); return; }
+    aiBubble.textContent = d.answer;
+    lastAnswer = d.answer;
+    chatHistory.push({ role:'user', content:qHist }, { role:'assistant', content:d.answer });
+    if (chatHistory.length > 12) chatHistory = chatHistory.slice(-12);
+
+    // 语音：入队前先掐掉正在播的（含垫场话），保证不叠音
+    if (d.audio) {
+      stopAllAudio();
+      for (const j of askQueue) j.cancelled = true;
+      askQueue.length = 0;
+      askQueue.push({ id: myTurn, b64: d.audio });
+      speakQueueWorker();
+    }
+    setSt('就绪', 'on');
+    saveSession();                       // 每轮答完自动存
+  } catch (e) {
+    aiBubble.textContent = '出错了：' + e.message; setSt('错误','err');
+  } finally {
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+}
+/* 播放/打断的实现在上面 ask() 之前 */
+
+/* ================= 上传音频 → 声纹校验 + 转写 ================= */
+let spkOn = false;                  // 声纹开关
+
+async function sttBlob(blob) {
+  const url = '/stt' + (spkOn ? '' : '?spk=0');
+  const r = await fetch(url, { method:'POST',
+    headers:{'Content-Type': blob.type || 'audio/webm'}, body: blob });
+  return await r.json();
+}
+
+async function handleTranscript(d) {
+  if (d.speaker_ok === false) {
+    sys('（不是你的声音，已忽略）' + (d.score != null ? ` 相似度 ${d.score}` : ''));
+    return;
+  }
+  if (!d.text) { sys('没听清（可打字）'); return; }
+
+  // 回声自激保护：识别到的内容跟刚问过的/刚答过的高度重合 → 是自己喇叭的声音
+  const t = d.text.replace(/\s/g, '');
+  if (lastQuestion && similar(t, lastQuestion)) { return; }
+  if (lastAnswer && (lastAnswer.replace(/\s/g,'').includes(t) || similar(t, lastAnswer.slice(0, 30)))) {
+    return;
+  }
+  lastQuestion = t;
+  await ask(d.text);
+}
+
+/* 粗判两段文字是否高度重合（防止把自己的播音当成人声） */
+function similar(a, b) {
+  if (!a || !b) return false;
+  const n = Math.min(a.length, b.length, 12);
+  if (n < 4) return false;
+  let hit = 0;
+  for (let i = 0; i < n; i++) if (a[i] === b[i]) hit++;
+  return hit / n > 0.7;
+}
+
+/* ================= 录音（手动挡） ================= */
+let mediaRec = null, chunks = [], recording = false;
+
+function pickMime() {
+  const c = ['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg'];
+  for (const m of c) if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
+  return '';
+}
+async function startRec(stream) {
+  chunks = [];
+  const mime = pickMime();
+  mediaRec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+  mediaRec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+  mediaRec.start();
+  recording = true;
+}
+function stopRec() {
+  if (!recording || !mediaRec) return;
+  try { mediaRec.stop(); } catch (_) { recording = false; }
+}
+
+/* ================= 手动挡 ================= */
+async function micDown(e) {
+  if (e) e.preventDefault();
+  if (mode !== 'manual' || recording || muted) return;
+  startFrames();
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: {
+      echoCancellation:true, noiseSuppression:true, autoGainControl:true, channelCount:1 } });
+    await startRec(stream);
+    mediaRec.onstop = async () => {
+      stopFrames();
+      stream.getTracks().forEach(t=>t.stop());
+      recording = false;
+      $('mic').classList.remove('rec');
+      if (!chunks.length) { setSt('就绪','on'); return; }
+      setSt('识别中…', 'work');
+      try {
+        const blob = new Blob(chunks, { type: chunks[0].type || 'audio/webm' });
+        await handleTranscript(await sttBlob(blob));
+      } catch (err) { sys('识别失败：' + err.message); }
+      setSt('就绪', 'on');
+    };
+    $('mic').classList.add('rec');
+    setSt('在听…', 'work');
+  } catch (err) { sys('麦克风打不开：' + err.message); }
+}
+function micUp(e) {
+  if (e) e.preventDefault();
+  if (mode !== 'manual') return;
+  stopRec();
+}
+$('mic').addEventListener('touchstart', micDown, { passive:false });
+$('mic').addEventListener('touchend', micUp, { passive:false });
+$('mic').addEventListener('mousedown', micDown);
+$('mic').addEventListener('mouseup', micUp);
+
+/* ================= 自动挡：Silero VAD（@ricky0123/vad-web）=================
+   换了官方库：不用自己数音量，靠神经网络判断"是不是人声"，
+   参数用官方默认值（redemptionMs 1400 = 说错/换气不会被切）。 */
+let myvad = null, meterEl = null;
+
+function float32ToWav(f32, rate) {
+  const len = f32.length;
+  const ab = new ArrayBuffer(44 + len * 2);
+  const v = new DataView(ab);
+  const ws = (o, s) => { for (let i=0;i<s.length;i++) v.setUint8(o+i, s.charCodeAt(i)); };
+  ws(0,'RIFF'); v.setUint32(4, 36+len*2, true); ws(8,'WAVE'); ws(12,'fmt ');
+  v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+  v.setUint32(24,rate,true); v.setUint32(28,rate*2,true); v.setUint16(32,2,true);
+  v.setUint16(34,16,true); ws(36,'data'); v.setUint32(40,len*2,true);
+  let o = 44;
+  for (let i=0;i<len;i++) {
+    const s = Math.max(-1, Math.min(1, f32[i]));
+    v.setInt16(o, s < 0 ? s*0x8000 : s*0x7FFF, true); o += 2;
+  }
+  return new Blob([ab], { type:'audio/wav' });
+}
+
+/* ================= VAD 库按需加载（带重试） =================
+   手机信号差时，一进页面就下 400KB 库 + 11MB 推理引擎很容易失败，
+   所以改成"切自动挡时才拉"，失败可以再点一次重试。 */
+let vadLoadPromise = null;
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src; s.async = false;
+    s.onload = () => res(true);
+    s.onerror = () => rej(new Error(src + ' 下载失败'));
+    document.head.appendChild(s);
+  });
+}
+async function ensureVadLibs() {
+  if (window.vad && window.vad.MicVAD) return true;
+  if (vadLoadPromise) return vadLoadPromise;
+  vadLoadPromise = (async () => {
+    for (let i = 1; i <= 3; i++) {
+      try {
+        setSt(`加载语音识别库 ${i}/3…`, 'work');
+        if (typeof window.ort === 'undefined') await loadScript('/vad/ort.min.js');
+        if (!window.vad || !window.vad.MicVAD) await loadScript('/vad/vad.min.js');
+        if (window.vad && window.vad.MicVAD) return true;
+      } catch (e) {
+        sys('语音库加载失败（第 ' + i + ' 次）：' + e.message);
+      }
+      await new Promise(r => setTimeout(r, 1500));
+    }
+    return false;
+  })();
+  const ok = await vadLoadPromise;
+  if (!ok) vadLoadPromise = null;      // 允许下次再试
+  return ok;
+}
+
+async function startAuto() {
+  if (!(window.vad && window.vad.MicVAD)) {
+    const ok = await ensureVadLibs();
+    if (!ok) {
+      sys('语音库没下下来（网络太慢时常见，自动挡要下 ~11MB 的本地识别引擎）。'
+          + '手动挡不受影响；网络好了再点一次「自动挡」就会重试。');
+      setMode('manual');
+      return;
+    }
+  }
+  try {
+    myvad = await vad.MicVAD.new({
+      model: 'v5',
+      baseAssetPath: '/vad/',
+      onnxWASMBasePath: '/vad/',
+      processorType: 'auto',              // 优先 AudioWorklet，不行自动回退
+      positiveSpeechThreshold: 0.3,       // 官方默认
+      negativeSpeechThreshold: 0.25,
+      redemptionMs: 1400,                 // 静音多久才算说完（官方默认）
+      minSpeechMs: 400,
+      preSpeechPadMs: 800,
+      // 显式开回声消除，否则它会被自己播放的语音触发（自激循环）
+      getStream: () => navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
+      }),
+      ortConfig: (ort) => { try { ort.env.wasm.numThreads = 1; } catch(_){} },
+      onSpeechStart: () => {
+        // 你一开口 → 只是让喇叭闭嘴（避免人机声音重叠），
+        // 但**不取消**正在生成的回答：文本照常答完，只是不再念出来。
+        stopAudio();
+        startFrames();
+        $('mic').classList.add('rec');
+        setSt('在听…', 'work');
+      },
+      onVADMisfire: () => {
+        $('mic').classList.remove('rec');
+        setSt('就绪', 'on');
+      },
+      onSpeechEnd: async (audio) => {
+        stopFrames();
+        $('mic').classList.remove('rec');
+        setSt('识别中…', 'work');
+        try {
+          await handleTranscript(await sttBlob(float32ToWav(audio, 16000)));
+        } catch (e) { sys('识别失败：' + e.message); }
+        setSt('就绪', 'on');
+      },
+      onFrameProcessed: (p) => {
+        if (meterEl) meterEl.style.height = Math.min(100, (p.isSpeech || 0) * 100) + '%';
+      }
+    });
+    myvad.start();
+    meterEl = $('meter').firstElementChild;
+    $('meter').style.display = 'block';
+    sys('自动挡已开：直接说话，说完停一下就行' + (spkOn ? '（只认你的声音）' : ''));
+  } catch (e) {
+    sys('自动挡启动失败：' + e.message);
+    setMode('manual');
+  }
+}
+async function stopAuto() {
+  try { if (myvad) { await myvad.pause(); await myvad.destroy(); } } catch (_) {}
+  myvad = null;
+  stopAudio();
+  $('meter').style.display = 'none';
+  $('mic').classList.remove('rec','wait');
+}
+
+/* ================= 挡位切换 ================= */
+function setMode(m) {
+  mode = m;
+  saveSetting('mode', m);
+  document.querySelectorAll('#mode button').forEach(b => b.classList.toggle('act', b.dataset.m===m));
+  if (m === 'auto') {
+    $('q').placeholder = '自动挡：直接说';
+    startAuto();
+  } else {
+    stopAuto();
+    $('q').placeholder = '说话或打字…';
+    setSt('就绪', 'on');
+  }
+}
+document.querySelectorAll('#mode button').forEach(b => {
+  b.onclick = () => setMode(b.dataset.m);
+});
+$('think').onchange = () => { thinking = $('think').value; saveSetting('think', thinking);
+  sys('思考深度：' + $('think').selectedOptions[0].text); };
+$('more').onclick = () => {
+  const c = $('bar2').classList.toggle('collapsed');
+  $('more').classList.toggle('on', !c);
+};
+
+/* ================= 声纹：开关 / 灵敏度 / 多段录入 / 测分 ================= */
+$('spk').onchange = async () => {
+  spkOn = $('spk').value === 'on';
+  saveSetting('spk', spkOn ? 'on' : 'off');
+  if (!spkOn) { sys('声纹已关：谁说话都响应'); return; }
+  try {
+    const h = await (await fetch('/health')).json();
+    if (h.voiceprint) {
+      sys(`声纹已开：只响应你的声音（阈值 ${h.threshold}` +
+          (h.consistency != null ? `，录声纹时一致性 ${h.consistency}` : '') + '）');
+      return;
+    }
+    sys('还没录声纹 → 点「录声纹」，录 3 段（每段 3 秒）');
+    $('spk').value = 'off'; spkOn = false; saveSetting('spk', 'off');
+  } catch (_) { sys('连不上服务器'); }
+};
+
+$('sens').onchange = async () => {
+  const v = parseFloat($('sens').value);
+  saveSetting('sens', v);
+  try {
+    const r = await fetch('/threshold', { method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({ value: v }) });
+    const d = await r.json();
+    if (d.ok) sys(`灵敏度已设为「${$('sens').selectedOptions[0].text}」（阈值 ${d.threshold}）：数值越高越严格`);
+  } catch (e) { sys('设置失败：' + e.message); }
+};
+
+const blob2b64 = (blob) => new Promise((res, rej) => {
+  const fr = new FileReader();
+  fr.onload = () => res(String(fr.result).split(',')[1] || '');
+  fr.onerror = rej;
+  fr.readAsDataURL(blob);
+});
+
+/* 录一段固定时长的音频，返回 Blob */
+async function recordOnce(ms) {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: {
+    echoCancellation:true, noiseSuppression:true, autoGainControl:true, channelCount:1 } });
+  try {
+    const mime = pickMime();
+    const rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+    const cs = [];
+    rec.ondataavailable = (e) => { if (e.data && e.data.size) cs.push(e.data); };
+    const stopped = new Promise(res => { rec.onstop = res; });
+    rec.start();
+    await new Promise(r => setTimeout(r, ms));
+    rec.stop();
+    await stopped;
+    return new Blob(cs, { type: cs[0] ? cs[0].type : 'audio/webm' });
+  } finally {
+    stream.getTracks().forEach(t => t.stop());
+  }
+}
+
+const ENROLL_PROMPTS = [
+  '对着手机，用平常音量念：「今天做光纤耦合实验，先把激光器打开，把光路对准。」',
+  '接着念：「功率计的读数有点跳，我先检查一下接线牢不牢。」',
+  '最后念：「数据记好了，回去要整理曲线，然后写实验报告。」',
+];
+const ENROLL_MS = 5200;      // 实测：每段 5 秒比 3 秒分离度提升约 10%
+
+let enrolling = false;
+$('enroll').onclick = async () => {
+  if (enrolling) return;
+  enrolling = true;
+  $('enroll').classList.add('rec');
+  const bad = [];
+  try {
+    const clips = [];
+    for (let k = 1; k <= 3; k++) {
+      $('enroll').textContent = `第${k}段`;
+      sys(`【第 ${k}/3 段】${ENROLL_PROMPTS[k-1]}（约 5 秒，说满它）`);
+      setSt('录音中…', 'work');
+      const c = await recordOnce(ENROLL_MS);
+      // 质量门：音量够不够
+      const lv = await blobLevel(c);
+      if (lv < 0.004) {
+        sys(`第 ${k} 段声音太小（音量 ${lv.toFixed(4)}）→ 请靠近手机、大声一点，这段先不用`);
+        bad.push(k);
+      } else {
+        clips.push(c);
+        sys(`第 ${k} 段 ✓ 音量正常`);
+      }
+      setSt('就绪', 'on');
+      await new Promise(r => setTimeout(r, 400));
+    }
+    if (clips.length < 2) {
+      sys('有效录音不足 2 段（多数太小声），请重录');
+      return;
+    }
+    $('enroll').textContent = '处理中…';
+    setSt('处理中…', 'work');
+    const audios = [];
+    for (const c of clips) audios.push(await blob2b64(c));
+    const r = await fetch('/enroll', { method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({ audios }) });
+    const d = await r.json();
+    if (d.ok) {
+      sys(`✓ 声纹已录好（${d.samples} 段，一致性 ${d.consistency}）→ ${d.hint}`);
+      sys('已自动切到「只认我」；建议点「测分数」验证一下');
+      $('spk').value = 'on'; spkOn = true;
+    } else {
+      sys('注册失败：' + (d.error || '未知') + '（找安静点的地方重录）');
+    }
+  } catch (e) {
+    sys('录音出错：' + e.message);
+  } finally {
+    enrolling = false;
+    $('enroll').classList.remove('rec');
+    $('enroll').textContent = '录声纹';
+    setSt('就绪', 'on');
+  }
+};
+
+/* 用 WebAudio 量一段录音的平均音量，判断是不是太小声 */
+async function blobLevel(blob) {
+  try {
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    const buf = await ac.decodeAudioData(await blob.arrayBuffer());
+    const d = buf.getChannelData(0);
+    let sum = 0;
+    for (let i = 0; i < d.length; i += 16) sum += d[i] * d[i];
+    const rms = Math.sqrt(sum / (d.length / 16));
+    await ac.close();
+    return rms;
+  } catch (_) { return 1; }        // 解码失败就别拦
+}
+
+/* ================= 历史会话 ================= */
+let currentSid = localStorage.getItem('lab_sid') || '';
+
+async function loadSessions() {
+  try {
+    const d = await (await fetch('/sessions')).json();
+    const box = $('sesslist');
+    box.innerHTML = '';
+    if (!d.sessions || !d.sessions.length) {
+      box.innerHTML = '<div class="sess" style="color:#8b93a7">还没有历史对话</div>';
+      return;
+    }
+    for (const s of d.sessions) {
+      const row = document.createElement('div');
+      row.className = 'sess' + (s.id === currentSid ? ' act' : '');
+      const t = document.createElement('div');
+      t.className = 't';
+      const dt = new Date((s.updated || 0) * 1000);
+      const hh = String(dt.getHours()).padStart(2,'0') + ':' + String(dt.getMinutes()).padStart(2,'0');
+      t.textContent = (s.title || '新对话');
+      const n = document.createElement('span'); n.className = 'n'; n.textContent = hh;
+      const del = document.createElement('button');
+      del.className = 'del'; del.textContent = '✕';
+      del.onclick = async (e) => {
+        e.stopPropagation();
+        if (!confirm('删除这个对话？')) return;
+        await fetch('/sessions/' + s.id, { method: 'DELETE' });
+        if (s.id === currentSid) { newChat(); }
+        loadSessions();
+      };
+      row.appendChild(t); row.appendChild(n); row.appendChild(del);
+      row.onclick = () => openSession(s.id);
+      box.appendChild(row);
+    }
+  } catch (e) { sys('读取历史失败：' + e.message); }
+}
+
+async function openSession(sid) {
+  try {
+    const d = await (await fetch('/sessions/' + sid)).json();
+    if (d.error) { sys('打开失败：' + d.error); return; }
+    currentSid = sid;
+    localStorage.setItem('lab_sid', sid);
+    chatHistory = (d.messages || []).slice();
+    // 重画对话区
+    logEl.innerHTML = '';
+    let bubble = null;
+    for (const m of chatHistory) {
+      if (m.role === 'user') { bubble = say('user', m.content); }
+      else { bubble = say('ai', m.content); }
+    }
+    sys('已打开：' + (d.title || '对话'));
+    closeDrawer();
+    loadSessions();
+  } catch (e) { sys('打开失败：' + e.message); }
+}
+
+function newChat() {
+  currentSid = '';
+  localStorage.removeItem('lab_sid');
+  chatHistory = [];
+  logEl.innerHTML = '<div class="sys">摄像头自动开 · 直接说话提问</div>';
+  sys('新对话已开始');
+  closeDrawer();
+  loadSessions();
+}
+
+async function saveSession() {
+  if (!chatHistory.length) return;
+  try {
+    const title = chatHistory.find(m => m.role === 'user')?.content?.slice(0, 24) || '新对话';
+    const r = await fetch('/sessions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: currentSid || undefined, title, messages: chatHistory })
+    });
+    const d = await r.json();
+    if (d.id && d.id !== currentSid) {
+      currentSid = d.id;
+      localStorage.setItem('lab_sid', d.id);
+    }
+  } catch (e) { /* 存不上不影响使用 */ }
+}
+
+function openDrawer() { $('drawer').classList.add('open'); $('scrim').classList.add('open'); loadSessions(); }
+function closeDrawer() { $('drawer').classList.remove('open'); $('scrim').classList.remove('open'); }
+$('menu').onclick = openDrawer;
+$('closedrawer').onclick = closeDrawer;
+$('scrim').onclick = closePanels;
+$('newchat').onclick = newChat;
+
+/* ================= 资料内容预览 ================= */
+async function viewDoc(id) {
+  try {
+    const r = await fetch('/docs/' + encodeURIComponent(id));
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.doc) { sys(d.error || '打不开这份资料'); return; }
+    $('dvname').textContent = `${d.doc.name}　（${d.doc.chars} 字）`;
+    $('dvtext').textContent = d.doc.text || '（这份资料没有正文）';
+    $('docview').classList.add('open');
+    $('dvtext').scrollTop = 0;
+  } catch (e) { sys('打开失败：' + e.message); }
+}
+function closeDocView() { $('docview').classList.remove('open'); }
+$('dvclose').onclick = closeDocView;
+$('docview').onclick = (e) => { if (e.target.id === 'docview') closeDocView(); };
+
+/* ================= 上下文深度（可选 + 手动输入） ================= */
+let histLimit = 6;          // 默认 6 轮（12 条消息）
+
+async function loadHistLimit() {
+  try {
+    const d = await (await fetch('/prompt')).json();
+    if (d.history_limit) {
+      histLimit = d.history_limit;
+      const sel = $('histsel');
+      if ([...sel.options].some(o => o.value === String(histLimit))) sel.value = String(histLimit);
+      else sel.value = 'custom';
+      $('histcustom').value = histLimit;
+      $('histcustom').style.display = (sel.value === 'custom') ? '' : 'none';
+    }
+  } catch (_) {}
+}
+
+async function setHistLimit(n) {
+  n = Math.max(0, Math.min(60, parseInt(n, 10) || 0));
+  histLimit = n;
+  try {
+    await fetch('/prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ history_limit: n }) });
+    sys(`上下文深度 = ${n} 轮（0 = 不带历史）` + (n > 6 ? '（更长会更贵一点）' : ''));
+  } catch (e) { sys('设置失败：' + e.message); }
+}
+
+$('histsel').onchange = () => {
+  const v = $('histsel').value;
+  if (v === 'custom') {
+    $('histcustom').style.display = '';
+    $('histcustom').focus();
+  } else {
+    $('histcustom').style.display = 'none';
+    setHistLimit(v);
+  }
+};
+$('histcustom').onchange = () => {
+  const n = parseInt($('histcustom').value, 10);
+  if (!isNaN(n)) setHistLimit(n);
+};
+
+/* ================= 资料上传 / 提示词编辑 ================= */
+function openPanel(id) { $(id).classList.add('open'); $('scrim').classList.add('open'); }
+function closePanels() {
+  $('docpanel').classList.remove('open');
+  $('promptpanel').classList.remove('open');
+  $('drawer').classList.remove('open');
+  $('scrim').classList.remove('open');
+}
+$('scrim').onclick = closePanels;
+
+async function loadDocs() {
+  try {
+    const d = await (await fetch('/docs')).json();
+    // 分组下拉
+    const sel = $('docgroup');
+    const cur = sel.value;
+    sel.innerHTML = '';
+    const groups = d.groups || [];
+    if (!groups.length) {
+      const o = document.createElement('option');
+      o.value = ''; o.textContent = '（还没有实验，点右边新建）';
+      sel.appendChild(o);
+    }
+    for (const g of groups) {
+      const o = document.createElement('option');
+      o.value = g; o.textContent = g || '(未分组)';
+      sel.appendChild(o);
+    }
+    // 优先：当前激活 > 之前选的 > 第一个
+    const want = d.active || cur || (groups[0] || '');
+    if (groups.includes(want)) sel.value = want;
+
+    // 资料列表（只显示当前分组的）
+    const box = $('doclist');
+    box.innerHTML = '';
+    const mine = (d.docs || []).filter(x => (x.group || '') === (sel.value || ''));
+    if (!mine.length) {
+      box.innerHTML = '<div class="hint">这个实验还没有资料</div>';
+    } else {
+      for (const doc of mine) {
+        const row = document.createElement('div');
+        row.className = 'docrow';
+        const n = document.createElement('div'); n.className = 'n'; n.textContent = doc.name;
+        n.style.cursor = 'pointer';
+        n.title = '点一下看内容';
+        n.onclick = () => viewDoc(doc.id);
+        const c = document.createElement('span'); c.className = 'c';
+        c.textContent = (doc.pages > 1 ? doc.pages + '页 / ' : '') + doc.chars + '字';
+        const eye = document.createElement('button'); eye.className = 'eye'; eye.textContent = '👁';
+        eye.title = '看一下内容';
+        eye.onclick = () => viewDoc(doc.id);
+        const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕';
+        x.onclick = async () => {
+          await fetch('/docs/' + doc.id, { method: 'DELETE' });
+          loadDocs(); sys('已删除：' + doc.name);
+        };
+        row.appendChild(n); row.appendChild(c); row.appendChild(eye); row.appendChild(x);
+        box.appendChild(row);
+      }
+    }
+    // 其他实验的（灰显，点一下切过去）
+    const others = (d.docs || []).filter(x => (x.group || '') !== (sel.value || ''));
+    if (others.length) {
+      const t = document.createElement('div');
+      t.className = 'gsep';
+      t.textContent = `其他实验的资料（${others.length} 份，切过去才会生效）`;
+      box.appendChild(t);
+      const byg = {};
+      for (const o of others) (byg[o.group || '(未分组)'] ||= []).push(o);
+      for (const [g, arr] of Object.entries(byg)) {
+        const row = document.createElement('div');
+        row.className = 'docrow';
+        const n = document.createElement('div'); n.className = 'n';
+        n.textContent = `${g} · ${arr.length} 份`;
+        row.appendChild(n);
+        row.style.opacity = '.6';
+        box.appendChild(row);
+      }
+    }
+  } catch (e) { sys('读取资料失败：' + e.message); }
+}
+
+async function switchGroup(g) {
+  const r = await fetch('/docs/activate', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ group: g }) });
+  const d = await r.json();
+  if (d.ok) { sys(`当前实验已切到「${g || '(未分组)'}」`); loadDocs(); }
+  else sys('切换失败：' + d.error);
+}
+
+$('upload').onclick = () => { openPanel('docpanel'); loadDocs(); };
+$('docclose').onclick = closePanels;
+$('docgroup').onchange = () => switchGroup($('docgroup').value);
+$('newgroup').onclick = async () => {
+  const name = prompt('新实验的名字（例如：实验三 光纤与光源耦合）');
+  if (!name || !name.trim()) return;
+  await switchGroup('');                       // 先切到未分组，避免误激活旧组
+  const g = name.trim();
+  // 后端没有"只建组"的接口，就传个空文件建组
+  const blob = new Blob(['(空)'], { type: 'text/plain' });
+  const fd = new FormData();
+  fd.append('group', g);
+  fd.append('files', new File([blob], '说明.txt', { type: 'text/plain' }));
+  const r = await fetch('/docs', { method: 'POST', body: fd });
+  const d = await r.json();
+  if (d.error) { sys('新建失败：' + d.error); return; }
+  await switchGroup(g);
+  sys('已新建实验：' + g + '（可删掉那份说明文件）');
+};
+
+$('pickdoc').onclick = () => {
+  const g = $('docgroup').value;
+  if (!g) { sys('先点「＋新实验」建一个实验名，再上传资料'); return; }
+  $('docfile').dataset.group = g;
+  $('docfile').click();
+};
+$('docfile').onchange = async (e) => {
+  const files = Array.from(e.target.files || []);
+  const g = e.target.dataset.group || '';
+  e.target.value = '';
+  if (!files.length) return;
+
+  // 图片：问一个"资料名"，多张合并成一份；文档各算一份
+  const imgs = files.filter(f => /^image\//.test(f.type));
+  let docname = '';
+  if (imgs.length) {
+    const guess = '实验指导书';
+    docname = prompt(
+      `选了 ${imgs.length} 张照片。\n给这份资料起个名字（会合并成一份，不会一页一条）：`,
+      guess) || guess;
+  }
+
+  setSt('上传中…', 'work');
+  sys(`正在上传 ${files.length} 个文件到「${g}」…` + (imgs.length ? `（${imgs.length} 张照片将合并为「${docname}」）` : ''));
+  try {
+    const fd = new FormData();
+    fd.append('group', g);
+    if (docname) fd.append('docname', docname);
+    for (const f of files) fd.append('files', f, f.name);
+    const r = await fetch('/docs', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (d.error) { sys('上传失败：' + d.error); }
+    else {
+      for (const a of (d.added || [])) {
+        sys(a.ok ? `✓ ${a.name}（${a.pages > 1 ? a.pages + ' 页 / ' : ''}${a.chars} 字）`
+                 : `✗ ${a.name}：${a.msg}`);
+      }
+      sys('这些资料只在本实验生效');
+    }
+    loadDocs();
+  } catch (err) { sys('上传出错：' + err.message); }
+  setSt('就绪', 'on');
+};
+
+/* 提示词 */
+async function loadPrompt() {
+  try {
+    const d = await (await fetch('/prompt')).json();
+    $('prompttext').value = d.system || '';
+    if (d.is_default) $('prompttext').dataset.isDefault = '1';
+    else delete $('prompttext').dataset.isDefault;
+  } catch (e) { sys('读取提示词失败：' + e.message); }
+}
+$('promptbtn').onclick = async () => { openPanel('promptpanel'); await loadPrompt(); };
+$('promptclose').onclick = closePanels;
+$('promptsave').onclick = async () => {
+  const s = $('prompttext').value;
+  try {
+    const r = await fetch('/prompt', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ system: s }) });
+    const d = await r.json();
+    sys(d.ok ? '✓ 提示词已保存（下一轮问答生效）' : ('保存失败：' + d.error));
+    if (d.ok) closePanels();
+  } catch (e) { sys('保存失败：' + e.message); }
+};
+$('promptreset').onclick = async () => {
+  if (!confirm('恢复成默认提示词？你改的内容会丢失。')) return;
+  const r = await fetch('/prompt', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reset: true }) });
+  const d = await r.json();
+  $('prompttext').value = d.system || '';
+  sys('已恢复默认提示词');
+};
+
+/* ================= 闭麦 / 联网搜索开关 ================= */
+let muted = false, useSearch = true;
+
+$('mute').onclick = async () => {
+  muted = !muted;
+  $('mute').textContent = muted ? '🔇 已静音' : '🎤 在听';
+  $('mute').classList.toggle('rec', muted);
+
+  // 自动挡：真的暂停/恢复 VAD
+  if (myvad) {
+    try { muted ? await myvad.pause() : await myvad.start(); }
+    catch (e) { sys('切换失败：' + e.message); }
+  }
+  // 手动挡：停掉可能正在录的音
+  if (muted && mode === 'manual') {
+    try { stopRec(); } catch (_) {}
+    if ($('mic').classList.contains('rec')) $('mic').classList.remove('rec');
+  }
+
+  if (muted) {
+    stopAllAudio();                  // 静音时顺手让喇叭也停
+    $('mic').classList.remove('rec');
+    setSt('已静音');
+    sys(mode === 'auto'
+      ? '已闭麦：VAD 已暂停，它听不到你（点一下恢复）'
+      : '已闭麦：手动挡下按麦克风也不会录（点一下恢复）');
+  } else {
+    setSt('就绪', 'on');
+    sys('麦克风已恢复');
+    if (mode === 'auto' && !myvad) { sys('（自动挡未启动，先切到自动挡再试）'); }
+  }
+};
+
+$('filler').onclick = () => {
+  fillerOn = !fillerOn;
+  saveSetting('filler', fillerOn);
+  $('filler').textContent = fillerOn ? '💬 垫场：开' : '💬 垫场：关';
+  sys(fillerOn ? '垫场话已开：问完会先说一句"嗯，我看一下"' : '垫场话已关：直接等真回答');
+};
+$('websearch').onclick = () => {
+  useSearch = !useSearch;
+  saveSetting('search', useSearch);
+  $('websearch').textContent = useSearch ? '🌐 联网：开' : '🌐 联网：关';
+  sys(useSearch ? '联网搜索已开：需要查资料时它会自动搜' : '联网搜索已关：只用模型自己的知识');
+};
+
+/* 自适应：长期微调声纹 */
+$('adapt').onchange = async () => {
+  try {
+    const r = await fetch('/adapt', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ enabled: $('adapt').checked }) });
+    const d = await r.json();
+    sys(d.enabled ? '自适应已开：每次正常对话后会小幅微调声纹（越用越准）' : '自适应已关：声纹固定在注册时的样子');
+  } catch (e) { sys('设置失败：' + e.message); }
+};
+$('adaptreset').onclick = async () => {
+  try {
+    const r = await fetch('/adapt', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ reset: true }) });
+    const d = await r.json();
+    sys(`声纹已退回注册时的状态（自适应累积清零）`);
+  } catch (e) { sys('重置失败：' + e.message); }
+};
+
+/* 测当前分数：录一句，看跟已注册声纹有多像（不拦截） */
+$('scorem').onclick = async () => {
+  if (enrolling) return;
+  enrolling = true;
+  $('scorem').classList.add('rec');
+  $('scorem').textContent = '说…';
+  sys('测分数：请说一句（3 秒）');
+  try {
+    const blob = await recordOnce(3200);
+    const r = await fetch('/test_score', { method:'POST',
+      headers:{'Content-Type': blob.type || 'audio/webm'}, body: blob });
+    const d = await r.json();
+    if (d.error) sys('测分失败：' + d.error);
+    else sys(`本次相似度 ${d.score}（阈值 ${d.threshold}）→ ${d.match ? '✅ 判定为你' : '❌ 判定不是你'}`);
+  } catch (e) { sys('测分出错：' + e.message); }
+  finally {
+    enrolling = false;
+    $('scorem').classList.remove('rec');
+    $('scorem').textContent = '测分数';
+    setSt('就绪', 'on');
+  }
+};
+
+/* ================= 对话里直接发视频提问（不进资料库） ================= */
+$('vidask').onclick = () => $('vfile').click();
+$('vfile').onchange = async (e) => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';                       // 允许连续拍同一段
+  if (!f) return;
+  setSt('处理视频中…', 'work');
+  sys(`视频处理中：抽帧 + 把你说的话转成文字（约 10 秒，${Math.round(f.size / 1048576 * 10) / 10}MB）…`);
+  try {
+    const fd = new FormData();
+    fd.append('files', f, f.name || 'clip.mp4');
+    const r = await fetch('/video_probe', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (d.error) { sys('视频用不了：' + d.error); setSt('就绪', 'on'); return; }
+    const typed = $('q').value.trim();
+    if (typed) $('q').value = '';
+    await ask(typed, { images: d.frames || [], imgOnly: !typed,
+                       videoTranscript: d.transcript || '', isVideo: true });
+  } catch (err) {
+    sys('视频上传失败：' + err.message);
+  }
+  setSt('就绪', 'on');
+};
+
+/* ================= 屏幕共享（电脑端首选；手机浏览器多半不支持） =================
+   开着的时候，抽帧/推流都用屏幕画面，提问就带屏幕内容。 */
+let screenStream = null, screenVideo = null;
+function activeVideo() { return (screenStream && screenVideo) ? screenVideo : $('thumb'); }
+async function toggleScreen() {
+  if (screenStream) {
+    try { screenStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+    screenStream = null;
+    if (screenVideo) { try { screenVideo.srcObject = null; } catch (_) {} screenVideo = null; }
+    setTimeout(() => { const b = $('screenbtn'); if (b && !screenStream) b.textContent = '🖥 投屏：关'; }, 0);
+    sys('屏幕共享已关：恢复用摄像头画面');
+    return;
+  }
+  if (!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia)) {
+    sys('这个浏览器不支持屏幕共享（手机浏览器基本都不支持，用电脑 Chrome 打开这个页面再试）');
+    return;
+  }
+  try {
+    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 2 }, audio: false });
+  } catch (e) {
+    sys('没拿到屏幕权限：' + (e.message || e));
+    return;
+  }
+  screenVideo = document.createElement('video');
+  screenVideo.playsInline = true; screenVideo.muted = true; screenVideo.autoplay = true;
+  screenVideo.srcObject = screenStream;
+  screenVideo.style.display = 'none';
+  document.body.appendChild(screenVideo);
+  await screenVideo.play().catch(() => {});
+  const tr = screenStream.getVideoTracks()[0];
+  if (tr) tr.onended = () => { if (screenStream) toggleScreen(); };
+  $('screenbtn').textContent = '🖥 投屏：开';
+  sys('屏幕共享已开：之后的提问和推流都带屏幕画面（再点一下关闭）');
+}
+$('screenbtn').onclick = () => toggleScreen();
+
+/* ================= 打字发送 ================= */
+async function sendTyped() {
+  const t = $('q').value.trim();
+  if (!t) {
+    // 空着按发送 = 只发画面（不用打字）
+    // 空着按发送 = 只发画面（不用打字）；摄像头关了就用最近拍到的几张
+    if (!camStream && !lastFrames.length) {
+      sys('没有画面也没有文字：先点「🎥 视频：开」，或打几个字再发'); return;
+    }
+    $('q').value = '';
+    startFrames(); stopFrames();
+    await ask('', { imgOnly: true });
+    setSt('就绪', 'on');
+    return;
+  }
+  $('q').value = '';
+  startFrames(); stopFrames();
+  await ask(t);
+  setSt('就绪', 'on');
+}
+$('send').onclick = sendTyped;
+$('q').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendTyped(); });
+
+/* ================= 启动 ================= */
+/* 按上次的配置复原（用户要求：每次进来不要给我初始化） */
+function restoreSettings() {
+  const s = savedSettings();
+  if (s.think) { thinking = s.think; $('think').value = s.think; }
+  if (s.sens) { $('sens').value = String(s.sens); }        // 阈值本身存在服务端
+  if (s.search === false) { useSearch = false; $('websearch').textContent = '🌐 联网：关'; }
+  if (s.filler === false) { fillerOn = false; $('filler').textContent = '💬 垫场：关'; }
+  if (s.adapt === false) { $('adapt').checked = false; }
+  if (typeof s.vid === 'boolean') vidOn = s.vid;
+  setMode(s.mode || 'manual');
+  if (s.spk === 'on') restoreSpk();
+  if (s.zoom) setTimeout(() => applyZoom(Number(s.zoom) || 1), 900);
+  sys('已按上次设置恢复：' + [s.think ? '思考' + ({none:'无',low:'低',high:'高',max:'满'}[s.think] || s.think) : null,
+      s.mode === 'auto' ? '自动挡' : '手动挡', s.search === false ? '联网关' : null,
+      s.filler === false ? '垫场关' : null, (typeof s.vid === 'boolean' && !s.vid) ? '视频关' : null,
+      s.zoom > 1 ? '缩放' + s.zoom + '×' : null].filter(Boolean).join(' / '));
+}
+async function restoreSpk() {
+  try {
+    const h = await (await fetch('/health')).json();
+    if (h.voiceprint) { $('spk').value = 'on'; spkOn = true; sys('声纹：沿用上次设置，只响应你的声音'); }
+  } catch (_) {}
+}
+$('adapt').addEventListener('change', () => saveSetting('adapt', $('adapt').checked));
+
+window.addEventListener('load', () => {
+  restoreSettings();
+  loadHistLimit();
+  setTimeout(() => setVid(vidOn), 600);
+  // 恢复上次对话
+  if (currentSid) setTimeout(() => openSession(currentSid), 900);
+  else loadSessions();
+});
+</script>
+</body>
+</html>

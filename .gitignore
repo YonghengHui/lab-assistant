@@ -1,0 +1,20 @@
+# 绝不提交
+.env
+*.pem
+*.key
+*.crt
+voiceprint*.json
+docs.json
+sessions/
+lab_context.md
+prompt.json
+*.log
+static/vad/
+*.onnx
+venv/
+__pycache__/
+*.bak-*
+test_*.py
+*.wav
+*.mp3
+*.png
