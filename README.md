@@ -5,6 +5,7 @@
 ![vibe coded](https://img.shields.io/badge/vibe--coded-%F0%9F%A7%83-ff69b4)
 ![status](https://img.shields.io/badge/status-alpha-orange)
 ![license](https://img.shields.io/badge/license-MIT-blue)
+![checks](https://github.com/YonghengHui/lab-assistant/actions/workflows/checks.yml/badge.svg)
 
 > ⚠️ **这是个半成品（alpha）**：作者从零手搓、只为自己的实验课能用，**没经过别人测试**，
 > 一定有 bug 和没打磨的地方。看着有意思就自己改着玩，别指望开箱即用。
