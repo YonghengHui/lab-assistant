@@ -44,12 +44,21 @@ cp .env.example .env && vi .env           # 填 API key
 
 ## 提交之前
 
-- **不要提交密钥 / 隐私**：仓库自带的审查脚本可以查一遍
+- **跑一遍自检**（语法 + 敏感信息扫描，和 CI 用的是同一套）：
 
   ```bash
-  python3 scripts/oss_audit.py . --history        # 0 个 BLOCKER 再推
-  python3 scripts/oss_audit.py . --hints "你的真名,你的学校"   # 想更严可以加提示词
+  bash scripts/check.sh
   ```
+
+  也可以单独跑扫描、加自己的关键词（比如真名、学校）：
+
+  ```bash
+  python3 scripts/oss_audit.py . --history
+  python3 scripts/oss_audit.py . --hints "你的真名,你的学校"
+  ```
+
+- **GitHub Actions（可选）**：把 `scripts/ci-example.yml` 复制到 `.github/workflows/checks.yml` 就能在 push/PR 时自动跑上面这两步
+  （GitHub 网页上加文件 1 分钟；**用 API/脚本推的话 GitHub 要求 token 带 `workflow` 权限**）。
 
 - **前端改动自测**：起个静态服务 + 无头浏览器把流程跑一遍（这个仓库的改动就是这么验证的），
   在 PR 里说一句"我怎么验的"即可
