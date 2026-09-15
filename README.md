@@ -2,12 +2,24 @@
 
 [English →](README.en.md)
 
+![vibe coded](https://img.shields.io/badge/vibe--coded-%F0%9F%A7%83-ff69b4)
+![status](https://img.shields.io/badge/status-alpha-orange)
+![license](https://img.shields.io/badge/license-MIT-blue)
+
 > ⚠️ **这是个半成品（alpha）**：作者从零手搓、只为自己的实验课能用，**没经过别人测试**，
 > 一定有 bug 和没打磨的地方。看着有意思就自己改着玩，别指望开箱即用。
 > 遇到问题欢迎提 issue，但请理解这还是个个人玩具。
+>
+> 🧃 **Vibe coded**：绝大部分代码是作者**和 AI 结对聊出来的**（vibe coding）——
+> 功能都实测过（真机真 API），但代码风格是"边聊边长"的，命名/结构不统一，
+> **别拿它当工程范本**，当"能跑的参考实现"看就好。
 
 **手机对着设备边看边问的语音+视觉助教。** 打开网页就能用：摄像头对着实验台提问，
 它看着画面、听着你说，一步步告诉你怎么做，答案同时用语音念出来。
+
+<p align="center">
+  <img src="assets/shot-main.png" width="330" alt="手机上的实验助手：边问边答">
+</p>
 
 自托管、单文件后端、2C2G 小机器就能跑；除了几个云端 API（对话模型 + 语音识别 + 语音合成），
 没有别的依赖。
@@ -18,8 +30,12 @@
 （资料库 / 拍照提问 / 录视频提问 / 声纹 / 语音播报）：
 
 1. 把文件丢到任意静态托管（GitHub Pages / Vercel），或本机 `python3 -m http.server` 后打开
-2. 打开页面 → **⚙️ 填一个 API Key**（默认走阿里百炼，一个 key 覆盖对话 / 看图 / 听写）
+2. 打开页面 → **⚙️ 选一家服务商、贴一个 API Key**（预设里「阿里百炼」一个 key 覆盖对话/看图/听写；也能在下面给"看图/听写"单独选另一家）
 3. 用手机浏览器打开（**必须 https 或 localhost**，否则摄像头不可用）→ 拍一张 / 录一段，直接问
+
+<p align="center">
+  <img src="assets/shot-docs.png" width="330" alt="资料库：当前实验的资料会自动进上下文">
+</p>
 
 想要跨设备共享、多人共用一个资料库 → 用下面的[服务器版](#跑起来)。
 
@@ -137,8 +153,10 @@ cp lab_context.example.md lab_context.md # 写你自己那门课的设备与实�
 **声纹模型从哪来？** 单文件版默认取同目录 `./campplus.onnx`，也可以在设置里填 URL。
 模型是 [CAM++ 中英文通用版](https://www.modelscope.cn/models/iic/speech_campplus_sv_zh_en_16k-common_advanced)（28MB）。
 
-**能换 OpenAI / Gemini / 本地模型吗？** 接口是 OpenAI 兼容协议：改 base URL + 模型名 + key 就行
-（单文件版在 ⚙️ 里改，服务器版在 `.env` 里改）。Roadmap 里有"做成预设"这一项，欢迎来加。
+**能换 OpenAI / Gemini / 本地模型吗？** 能。单文件版在 ⚙️ 里有**服务商预设**（阿里百炼 / OpenAI / DeepSeek /
+硅基流动 / 智谱 / Kimi / 本地 Ollama / 自定义），选一家会自动填好地址与模型；聊天用一家、
+看图听写用另一家也行（预设下面「看图/听写想用另一家」）。服务器版改 `.env` 里的 base URL 与模型名即可，
+见 `.env.example` 里的服务商清单。
 
 **数据会上传吗？** 单文件版：资料 / 对话 / 声纹 / Key **只存在本机浏览器**，提问时只有"这一轮的画面和文字"
 发给你自己填的那个模型 API。服务器版同理，只是多了一台你自己的机器。
