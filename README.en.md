@@ -1,13 +1,26 @@
 # Lab Assistant (实验助手)
 
+[中文说明 →](README.md)
+
+![vibe coded](https://img.shields.io/badge/vibe--coded-%F0%9F%A7%83-ff69b4)
+![status](https://img.shields.io/badge/status-alpha-orange)
+![license](https://img.shields.io/badge/license-MIT-blue)
+
 > ⚠️ **Alpha / work in progress.** Built from scratch by one student for their own lab course,
 > never tested by anyone else. Expect bugs and rough edges. Tinker at your own risk.
-
-[中文说明 →](README.md)
+>
+> 🧃 **Vibe coded**: most of the code was written by **pair-programming with an AI** (vibe coding).
+> The features are real and tested on a real phone against real APIs, but the code grew
+> conversation-by-conversation — inconsistent naming and structure. **Don't use it as an
+> engineering reference**; treat it as a working prototype.
 
 **A voice + vision lab assistant you point your phone at.** Open the page in a mobile browser:
 aim the camera at your equipment and ask out loud. It sees what you see, hears what you say,
 walks you through the steps, and reads the answer aloud.
+
+<p align="center">
+  <img src="assets/shot-main.png" width="330" alt="Asking while working, on a phone">
+</p>
 
 Self-hosted, single-file backend, runs on a 2C2G VPS. The only external deps are cloud APIs
 (a chat model, an ASR model, a TTS voice).
@@ -22,6 +35,10 @@ Grab [`standalone.html`](standalone.html) — **one file, almost all features**
 2. Open it → **⚙️ paste one API key** (defaults to Alibaba DashScope; one key covers chat + vision + ASR)
 3. Open it on your phone (**https or localhost required** — browsers block the camera otherwise)
    → snap a photo or record a clip → just ask
+
+<p align="center">
+  <img src="assets/shot-docs.png" width="330" alt="Document library: the active experiment's docs go into context">
+</p>
 
 Need cross-device sharing or a shared document library → use the [self-hosted version](#run-it).
 
@@ -91,8 +108,10 @@ shared home, i.e. a server.
 **Where does the voiceprint model come from?** By default `./campplus.onnx` next to the HTML
 ([CAM++ zh/en general model](https://www.modelscope.cn/models/iic/speech_campplus_sv_zh_en_16k-common_advanced), 28MB).
 
-**Can I use OpenAI / Gemini / a local model?** The API is OpenAI-compatible — change base URL,
-model name and key (in ⚙️ for the standalone build, in `.env` for the server build).
+**Can I use OpenAI / Gemini / a local model?** Yes. The standalone build has **provider presets**
+(DashScope / OpenAI / DeepSeek / SiliconFlow / Zhipu / Kimi / local Ollama / custom) that fill in the
+base URL and model names for you — and you can use one provider for chat and another for vision/ASR.
+For the server build, edit `.env` (see the provider list in `.env.example`).
 
 **Is my data uploaded?** Standalone: docs/chats/voiceprint/key stay in your browser; only the
 current question (text + this round's frames) goes to the model API you configured. Same for the
