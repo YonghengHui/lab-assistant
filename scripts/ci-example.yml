@@ -1,0 +1,39 @@
+name: checks
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  syntax-and-secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 语法检查（两个后端 + 前端内嵌 JS 抽取）
+        run: |
+          python -m py_compile lab_server.py app.py
+          python - <<'PY'
+          import re, pathlib, sys
+          for name in ("lab.html", "standalone.html", "index.html"):
+              html = pathlib.Path(name).read_text(encoding="utf-8")
+              blocks = re.findall(r"<script>(.*?)</script>", html, re.S)
+              if not blocks:
+                  print(f"(跳过 {name}：没有内嵌脚本)"); continue
+              code = "\n".join(blocks)
+              pathlib.Path(f"/tmp/{name}.js").write_text(code, encoding="utf-8")
+              print(f"{name}: 抽出 {len(code)} 字符 JS")
+          PY
+          # 用 node 做一次语法解析（有很多页内脚本，靠这个挡低级错误）
+          sudo apt-get install -y -qq nodejs >/dev/null 2>&1 || true
+          for f in /tmp/*.js; do node --check "$f" && echo "OK $f"; done
+
+      - name: 敏感信息扫描（密钥 / 隐私 / git 历史）
+        run: |
+          python scripts/oss_audit.py . --history
+          # 有 BLOCKER 就失败（脚本会以非 0 退出）
