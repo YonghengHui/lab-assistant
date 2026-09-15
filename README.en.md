@@ -5,6 +5,7 @@
 ![vibe coded](https://img.shields.io/badge/vibe--coded-%F0%9F%A7%83-ff69b4)
 ![status](https://img.shields.io/badge/status-alpha-orange)
 ![license](https://img.shields.io/badge/license-MIT-blue)
+![checks](https://github.com/YonghengHui/lab-assistant/actions/workflows/checks.yml/badge.svg)
 
 > ⚠️ **Alpha / work in progress.** Built from scratch by one student for their own lab course,
 > never tested by anyone else. Expect bugs and rough edges. Tinker at your own risk.
