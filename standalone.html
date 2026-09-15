@@ -91,6 +91,9 @@
 
   <!-- 设置 -->
   <div id="cfgPanel" class="panel">
+    <label>服务商预设（选一个，自动填好地址与模型）</label>
+    <select id="c_preset"></select>
+    <div class="hint" id="presetNote"></div>
     <label>接口地址（OpenAI 兼容）</label>
     <input id="c_base" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1">
     <label>API Key（只存在本机浏览器里，不上传任何服务器）</label>
@@ -98,6 +101,11 @@
     <label>对话模型 / 视觉模型 / 语音识别模型</label>
     <input id="c_model" placeholder="qwen-plus"><input id="c_vl" placeholder="qwen-vl-max" style="margin-top:4px">
     <input id="c_asr" placeholder="qwen3-asr-flash" style="margin-top:4px">
+    <label>看图 / 听写 想用另一家？（可选，留空＝同上）</label>
+    <select id="c_auxpreset"></select>
+    <input id="c_auxbase" placeholder="接口地址（留空＝同上）" style="margin-top:4px">
+    <input id="c_auxkey" type="password" placeholder="它家的 API Key（留空＝用上面那个）" style="margin-top:4px">
+    <div class="hint" id="auxNote"></div>
     <label>联网搜索（可选，填 Tavily key；不填就没有搜索）</label>
     <input id="c_tavily" type="password" placeholder="tvly-...">
     <label>语音播报</label>
@@ -141,6 +149,7 @@ const DEF = {
   base: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   model: 'qwen-plus', vl: 'qwen-vl-max', asr: 'qwen3-asr-flash',
  tavily: '', tts: '1', spkurl: './campplus.onnx', spkth: '0.62',
+ preset: 'dashscope', auxpreset: '', auxbase: '', auxkey: '',
   sys: '你是实验课的现场助教。学生正站在仪器前，用手机拍给你看。\n'
      + '回答要求：只说该做什么，一次 3 步以内；先给判断依据（看到什么），再给动作；不确定就让学生补拍一张。不要长篇原理。'
 };
@@ -170,12 +179,70 @@ function dbAll(store) { return new Promise(r => { const q = tx(store).getAll(); 
 function dbPut(store, v) { return new Promise(r => { const q = tx(store, 'readwrite').put(v); q.onsuccess = () => r(q.result); }); }
 function dbDel(store, id) { return new Promise(r => { const q = tx(store, 'readwrite').delete(id); q.onsuccess = () => r(1); }); }
 
+/* ============ 服务商预设（照 Cherry Studio / LobeChat 的做法：选一家自动填好） ============ */
+const PROVIDERS = {
+  dashscope: { name: '阿里百炼（一个 key 全包）', base: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+               model: 'qwen-plus', vl: 'qwen-vl-max', asr: 'qwen3-asr-flash',
+               note: '一个 key 同时覆盖 对话 / 看图 / 听写，最省事。' },
+  openai:    { name: 'OpenAI', base: 'https://api.openai.com/v1',
+               model: 'gpt-4o-mini', vl: 'gpt-4o', asr: 'gpt-4o-audio-preview',
+               note: '看图走 gpt-4o，听写走带 input_audio 的模型；国内直连可能需代理。' },
+  deepseek:  { name: 'DeepSeek（只有文本）', base: 'https://api.deepseek.com/v1',
+               model: 'deepseek-chat', vl: '', asr: '',
+               note: '⚠️ 没有视觉/语音模型 —— 看图与听写请在下面「另一家」里选一个（如阿里百炼）。' },
+  siliconflow: { name: '硅基流动 SiliconFlow', base: 'https://api.siliconflow.cn/v1',
+               model: 'Qwen/Qwen3-8B', vl: 'Qwen/Qwen2.5-VL-32B-Instruct', asr: '',
+               note: '有视觉；语音识别接口与我们用的不同，暂不支持（听写留空）。' },
+  zhipu:     { name: '智谱 GLM', base: 'https://open.bigmodel.cn/api/paas/v4',
+               model: 'glm-4-flash', vl: 'glm-4v-flash', asr: '',
+               note: '有视觉；语音识别暂不支持。' },
+  moonshot:  { name: '月之暗面 Kimi', base: 'https://api.moonshot.cn/v1',
+               model: 'moonshot-v1-8k', vl: 'moonshot-v1-8k-vision-preview', asr: '',
+               note: '有视觉；语音识别暂不支持。' },
+  ollama:    { name: '本地 Ollama', base: 'http://localhost:11434/v1',
+               model: 'qwen2.5vl:7b', vl: 'qwen2.5vl:7b', asr: '',
+               note: '不用 key。手机访问要填电脑的局域网 IP，并让 Ollama 允许跨域（OLLAMA_ORIGINS=*）。' },
+  custom:    { name: '自定义 / 其它兼容接口', base: '', model: '', vl: '', asr: '',
+               note: '任何 OpenAI 兼容接口都行：填地址 + 模型名。模型名以服务商文档为准。' },
+};
+function fillPresetSelects() {
+  const opts = Object.entries(PROVIDERS).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join('');
+  $('c_preset').innerHTML = opts;
+  $('c_auxpreset').innerHTML = '<option value="">（不使用，同上）</option>' + opts;
+}
+function applyPreset(kind, key) {
+  const p = PROVIDERS[key];
+  if (!p) return;
+  if (kind === 'main') {
+    if (p.base) $('c_base').value = p.base;
+    if (p.model) $('c_model').value = p.model;
+    $('c_vl').value = p.vl; $('c_asr').value = p.asr;
+    $('presetNote').textContent = p.note || '';
+  } else {
+    if (p.base) $('c_auxbase').value = p.base;
+    $('auxNote').textContent = p.note || '';
+    if (!p.vl && !p.asr) $('auxNote').textContent = '⚠️ 这家也没有视觉/语音 —— 换一家（推荐阿里百炼）。';
+    if (p.asr && !$('c_asr').value) $('c_asr').value = p.asr;
+    if (p.vl && !$('c_vl').value) $('c_vl').value = p.vl;
+  }
+}
+fillPresetSelects();
+$('c_preset').onchange = () => applyPreset('main', $('c_preset').value);
+$('c_auxpreset').onchange = () => applyPreset('aux', $('c_auxpreset').value);
+const capBase = () => (cfg.auxbase || cfg.base);
+const capKey = () => (cfg.auxkey || cfg.key);
+
 /* ============ 设置 ============ */
 function loadCfg() {
   $('c_base').value = cfg.base; $('c_key').value = cfg.key || ''; $('c_model').value = cfg.model;
   $('c_vl').value = cfg.vl; $('c_asr').value = cfg.asr; $('c_sys').value = cfg.sys;
   $('c_tavily').value = cfg.tavily || ''; $('c_tts').value = cfg.tts || '1';
   $('c_spkurl').value = cfg.spkurl || ''; $('c_spkth').value = cfg.spkth || '';
+  $('c_preset').value = cfg.preset || 'dashscope';
+  $('c_auxpreset').value = cfg.auxpreset || '';
+  $('c_auxbase').value = cfg.auxbase || ''; $('c_auxkey').value = cfg.auxkey || '';
+  $('presetNote').textContent = (PROVIDERS[$('c_preset').value] || {}).note || '';
+  $('auxNote').textContent = (PROVIDERS[$('c_auxpreset').value] || {}).note || '';
   loadVoiceprint();
   $('keywarn').style.display = cfg.key ? 'none' : '';
 }
@@ -187,7 +254,9 @@ $('cfgSave').onclick = () => {
     model: $('c_model').value.trim() || DEF.model, vl: $('c_vl').value.trim() || DEF.vl,
     asr: $('c_asr').value.trim() || DEF.asr, tavily: $('c_tavily').value.trim(),
     tts: $('c_tts').value, sys: $('c_sys').value,
-    spkurl: $('c_spkurl').value.trim() || DEF.spkurl, spkth: $('c_spkth').value.trim() || DEF.spkth });
+    spkurl: $('c_spkurl').value.trim() || DEF.spkurl, spkth: $('c_spkth').value.trim() || DEF.spkth,
+    preset: $('c_preset').value, auxpreset: $('c_auxpreset').value,
+    auxbase: $('c_auxbase').value.trim(), auxkey: $('c_auxkey').value.trim() });
   localStorage.setItem(LS, JSON.stringify(cfg));
   $('cfgPanel').style.display = 'none'; $('keywarn').style.display = cfg.key ? 'none' : '';
   sys('设置已保存（本机）');
@@ -302,10 +371,10 @@ async function audioWav16k(blob) {
 function b64(blob) { return new Promise(res => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.readAsDataURL(blob); }); }
 
 async function asr(blob) {
-  if (!cfg.key) return '';
+  if (!capKey() || !cfg.asr) return '';
   const data = await b64(blob);
-  const r = await fetch(cfg.base + '/chat/completions', {
-    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key },
+  const r = await fetch(capBase() + '/chat/completions', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + capKey() },
     body: JSON.stringify({ model: cfg.asr, messages: [{ role: 'user', content: [{ type: 'input_audio', input_audio: { data: 'data:audio/wav;base64,' + data } }] }] })
   });
   const d = await r.json();
@@ -393,8 +462,9 @@ async function ensureLib(what) {
 
 /* --- 各类文件的文字提取 --- */
 async function vlText(dataUrl) {
-  const r = await fetch(cfg.base + '/chat/completions', {
-    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key },
+  if (!capKey()) throw new Error('没填 API Key');
+  const r = await fetch(capBase() + '/chat/completions', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + capKey() },
     body: JSON.stringify({ model: cfg.vl, max_tokens: 1800, messages: [{ role: 'user', content: [
       { type: 'text', text: DOC_PROMPT }, { type: 'image_url', image_url: { url: dataUrl } }] }] })
   });
@@ -712,7 +782,7 @@ $('mic').onclick = async () => {
   setSt('转写中…', 'work');
   let text = '';
   try { text = await asr(pcmToWav16k(pcm)); } catch (e) { sys('转写失败：' + e.message); }
-  if (!text) { sys('没听清，再说一次？'); setSt('就绪', 'on'); return; }
+  if (!text) { sys(cfg.asr ? '没听清，再说一次？' : '（没配语音识别模型：设置里填一个语音模型，或接着打字）'); setSt('就绪', 'on'); return; }
   sys('🎤 ' + text);
   await ask(text, {});
 };
@@ -787,10 +857,14 @@ async function ask(text, opts) {
   imgs.forEach(u => content.push({ type: 'image_url', image_url: { url: u } }));
   const msgs = [{ role: 'system', content: cfg.sys }, ...chatHistory.slice(-10),
                 { role: 'user', content: imgs.length ? content : content[0].text }];
+  const useVision = imgs.length > 0;
+  const epBase = useVision ? (cfg.auxbase || cfg.base) : cfg.base;
+  const epKey = useVision ? (cfg.auxkey || cfg.key) : cfg.key;
+  const epModel = useVision ? (cfg.vl || cfg.model) : cfg.model;
   try {
-    const r = await fetch(cfg.base + '/chat/completions', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key },
-      body: JSON.stringify({ model: imgs.length ? cfg.vl : cfg.model, messages: msgs, max_tokens: 1500 })
+    const r = await fetch(epBase + '/chat/completions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + epKey },
+      body: JSON.stringify({ model: epModel, messages: msgs, max_tokens: 1500 })
     });
     const d = await r.json();
     const ans = ((d.choices || [])[0] || {}).message?.content?.trim() ||
