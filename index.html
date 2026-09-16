@@ -100,7 +100,7 @@
 </footer>
 
 <script>
-const WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+const WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws' + location.search;
 const SAMPLE_RATE = 24000;
 const CHUNK_MS = 100;
 
@@ -310,7 +310,12 @@ function connect() {
   ws.onopen = async () => {
     setStatus('已连接', 'on');
     try {
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      // 重连时不能每次都新建：旧 AudioContext + 旧麦克风流不释放会越积越多
+      // （指示灯常亮、同一路声音被旧 worklet 推到新连接上，浏览器 AudioContext 上限约 6 → 之后整页失声）
+      stopMic();
+      if (!audioCtx || audioCtx.state === 'closed') {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
       if (audioCtx.state === 'suspended') await audioCtx.resume();
       micSampleRate = audioCtx.sampleRate || 48000;
       await startMic(audioCtx);

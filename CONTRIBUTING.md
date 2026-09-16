@@ -23,24 +23,29 @@ python3 -m http.server 8000     # 然后打开 http://localhost:8000/standalone.
 
 **B. 服务器版**
 
+前置：`python3` + venv、系统装 **ffmpeg**（视频抽帧/转写）、**node + npm**（跑下面的资源脚本要用）。
+
 ```bash
-git clone <this-repo> && cd lab-assistant
-python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
-bash scripts/fetch_vad_assets.sh          # 自动挡需要的浏览器端 VAD 资源
-cp .env.example .env && vi .env           # 填 API key
-./venv/bin/python lab_server.py           # 默认 https://0.0.0.0:8901
+git clone https://github.com/YonghengHui/lab-assistant && cd lab-assistant
+python3 -m venv venv && ./venv/bin/pip install -r requirements.txt   # 慢就加 -i 清华镜像
+bash scripts/fetch_vad_assets.sh          # 自动挡需要的浏览器端 VAD 资源（要 npm）
+cp .env.example .env && vi .env           # 填 API key（启动时自动读取 .env）
+./venv/bin/python lab_server.py           # 默认 127.0.0.1:8901（由 LAB_HOST/LAB_PORT 决定）
 ```
+
+手机要用摄像头得 **HTTPS**：在仓库根目录放一张自签证书（`cert.pem`/`key.pem`），没有就自动降级成 HTTP。
 
 ## 代码结构（哪里改什么）
 
 | 文件 | 作用 |
 |---|---|
 | `standalone.html` | **无服务器单文件版**：全部逻辑在一个 HTML 里（IndexedDB 资料库、本地抽帧、浏览器里跑声纹、语音播报） |
-| `lab_server.py` | 服务器版后端（单文件 aiohttp）：`/ask /stt /tts /docs /frame /video_probe /enroll` … |
+| `lab_server.py` | 服务器版后端（单文件 aiohttp）：`/ask /stt /docs /frame /video_probe /enroll` …（TTS 音频随 `/ask` 响应返回，没有单独的 `/tts` 路由） |
 | `lab.html` | 服务器版前端（手机浏览器页面） |
 | `app.py` + `index.html` | `:8900` 实时语音页（Qwen-Omni-Realtime 中转） |
 | `static/i18n.js` | 界面文案；**加一门语言 = 加一份表**（一次提交就能搞定） |
 | `scripts/fetch_vad_assets.sh` | 自动挡（浏览器端 VAD）的资源获取 |
+| `THIRD_PARTY_NOTICES.md` | 第三方组件许可证清单；**加新依赖时顺手更新它** |
 
 ## 提交之前
 
@@ -57,6 +62,9 @@ cp .env.example .env && vi .env           # 填 API key
   python3 scripts/oss_audit.py . --hints "你的真名,你的学校"
   ```
 
+  本机跑起来后，扫描会把**自己生成的** `.env` / 证书 / `sessions/` 报成 BLOCKER —— 这几样都在
+  `.gitignore` 里，属正常，**只要别提交就行**。
+
 - **GitHub Actions（可选）**：把 `scripts/ci-example.yml` 复制到 `.github/workflows/checks.yml` 就能在 push/PR 时自动跑上面这两步
   （GitHub 网页上加文件 1 分钟；**用 API/脚本推的话 GitHub 要求 token 带 `workflow` 权限**）。
 
@@ -69,7 +77,8 @@ cp .env.example .env && vi .env           # 填 API key
 
 - 单文件版语音播报用手机自带 TTS：不同浏览器音色差很多，可考虑接 API TTS
 - 声纹阈值默认 `0.62`，是按作者的设备 + 环境调的；换手机可能要微调（设置里可改）
-- 抽帧是均匀抽 4~8 帧：动作太快或视频太长会漏细节（可以做成"变化大就多抽"）
+- 抽帧间隔按时长自适应（≤20s 每 2s 一帧 / ≤60s 每 4s / 更长每 8s，最多 12 帧；对话内视频最多 6 帧）：
+  动作太快或视频太长会漏细节（可以做成"变化大就多抽"）
 - 服务器版是轮次问答，延迟 3~9 秒；想要低延迟得接实时语音模型
 - `file://` 直接打开时部分浏览器会拦摄像头/模块脚本 → 用 https 或 localhost
 

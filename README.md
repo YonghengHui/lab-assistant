@@ -22,14 +22,16 @@
 </p>
 
 自托管、单文件后端、2C2G 小机器就能跑；除了几个云端 API（对话模型 + 语音识别 + 语音合成），
-没有别的依赖。
+服务器版还需要系统装 **ffmpeg**（视频抽帧/转写用），以及 **node + npm**（只用来跑一次
+`scripts/fetch_vad_assets.sh` 取浏览器端 VAD 资源）。
 
 ## 30 秒上手（什么都不用装）
 
 不想架服务器？直接拿 [`standalone.html`](standalone.html) —— **一个文件，功能基本是全的**
 （资料库 / 拍照提问 / 录视频提问 / 声纹 / 语音播报）：
 
-1. 把文件丢到任意静态托管（GitHub Pages / Vercel），或本机 `python3 -m http.server` 后打开
+1. 把文件丢到任意静态托管（GitHub Pages / Vercel / 对象存储），或本机起个静态服务：
+   `python3 -m http.server 8000`，然后打开 `http://localhost:8000/standalone.html`
 2. 打开页面 → **⚙️ 选一家服务商、贴一个 API Key**（预设里「阿里百炼」一个 key 覆盖对话/看图/听写；也能在下面给"看图/听写"单独选另一家）
 3. 用手机浏览器打开（**必须 https 或 localhost**，否则摄像头不可用）→ 拍一张 / 录一段，直接问
 
@@ -83,29 +85,52 @@
 ```
 手机浏览器 ──HTTPS/WSS──> 本服务(单文件 aiohttp) ──> 云端 API
   · 摄像头抽帧、缩放、全屏          · /ask 调对话模型（带图）
-  · 录音 → 上传转写                 · /stt /tts 语音
+  · 录音 → 上传转写                 · /stt 语音转写（TTS 音频随 /ask 响应返回）
   · 浏览器端 VAD（自动挡）           · /docs 资料（照片走视觉 OCR、视频抽帧+转写）
   · 声纹校验在服务端（~30MB ONNX）
 ```
 
 **重活尽量放在手机浏览器**（抽帧、VAD、录音、播放），服务器只做转发和调 API，
-两个服务常驻内存各不到 1MB —— 2C2G 的小机器就够。
+两个服务常驻内存各约 20MB 以内（实测空闲 RSS 16~19MB）—— 2C2G 的小机器就够。
 
 ## 跑起来
 
+前置：`python3`（含 venv）、系统装 **ffmpeg**（视频抽帧/转写）、**node + npm**（只给下一步的
+资源脚本用）。国内装依赖慢可以加镜像：`pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt`
+（偶发 `No matching distribution`，重跑一次即可）。
+
 ```bash
-git clone <this-repo> && cd lab-assistant
+git clone https://github.com/YonghengHui/lab-assistant && cd lab-assistant
 python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
-bash scripts/fetch_vad_assets.sh        # 自动挡需要的浏览器端 VAD 资源
-cp .env.example .env && vi .env          # 填 API key
+bash scripts/fetch_vad_assets.sh        # 自动挡需要的浏览器端 VAD 资源（要 npm）
+cp .env.example .env && vi .env          # 填 API key（启动时自动读取，不用手动 source）
 cp lab_context.example.md lab_context.md # 写你自己那门课的设备与实验（可选）
+
+# 手机要用摄像头/麦克风 → 必须 HTTPS。自签一张证书，**放在仓库根目录**，
+# 并把 IP 换成你自己的局域网 / Tailscale IP（照抄示例 IP 手机会报证书不匹配）：
+openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 3650 \
+  -subj "/CN=lab" -addext "subjectAltName=IP:192.168.1.10"
+
 ./venv/bin/python lab_server.py
 ```
 
-- 手机要用摄像头/麦克风 → **必须 HTTPS**。自签证书即可（手机点"高级→继续前往"）。
-- 证书路径在 `lab_server.py`（cert.pem / key.pem），自己生成：
-  `openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 3650 -subj "/CN=lab" -addext "subjectAltName=IP:192.168.1.10"`
+启动日志会写明 `http://` 还是 `https://`、监听地址、以及**鉴权开/关**——
+手机连不上摄像头时先看这一行（没有 cert.pem/key.pem 时会安静降级成 HTTP，而 HTTP 下摄像头用不了）。
+
+- 端口被占（线上已有别的服务）→ 改 `.env` 里的 `LAB_PORT`；手机要访问 → `LAB_HOST` 填局域网/Tailscale IP。
 - 长期跑建议写成 systemd 用户服务（`Restart=always`，`EnvironmentFile=~/.env`，权限 600）。
+
+### 部署到公网？三条路
+
+1. **推荐：异地组网**（Tailscale / WireGuard）——服务只绑在虚拟网卡 IP 上，公网根本看不到它，零配置。
+2. **设一个访问口令**：`.env` 里 `LAB_TOKEN=<长随机串>`（例如 `openssl rand -hex 24`）。
+   之后页面/接口/静态资源全部要求口令：打开网页会先弹极简登录页，登录一次写 cookie（30 天有效）；
+   脚本/curl 可以用 `?token=xxx` 或 `Authorization: Bearer xxx`；`/health` 始终放行便于探活。
+   **留空 = 不鉴权（默认）**，行为与以前完全一致。
+3. **前置反向代理**做认证（Nginx/Caddy basic auth、Cloudflare Access 等）。
+
+⚠️ 直接把 `LAB_HOST=0.0.0.0` 暴露到公网**且不设口令**等于把 API 额度、资料库和声纹注册接口
+交给所有人（声纹只是"防误触发"的体验功能，**不是访问控制**）。
 
 ## 不想架服务器？用**单文件全量版**（`standalone.html`）
 
@@ -116,17 +141,24 @@ cp lab_context.example.md lab_context.md # 写你自己那门课的设备与实�
   按「实验」分组，当前组的资料自动进上下文
   - 照片 → 视觉模型 OCR；PDF → 本地解析文本层（扫描件自动转图让模型读）；
     Word/PPT → 本地解压提取；视频 → 抽 4 帧 + 把旁白转文字
-- **声纹「只认我的声音」**（可选）：在浏览器里跑 CAM++（与 Python 版 sherpa-onnx **逐位对齐**，实测余弦 0.99999），
+- **声纹「只认我的声音」**（可选）：在浏览器里跑 CAM++（与 Python 版 sherpa-onnx **逐位对齐**，实测余弦 0.9999+），
   录 3 段注册；说话提问时不像本人就不发出去
   - 需要把声纹模型（`campplus_sv_advanced.onnx`，28MB）放在**同目录**（默认取 `./campplus.onnx`），
     或在设置里填模型 URL；推理库 onnxruntime-web 自动从 CDN 取
 - **多会话历史**、可编辑提示词、**语音播报**（手机自带 TTS，免费）、
   **联网搜索**（可选，填 Tavily key）、推流帧缓存、全屏 / 缩放
 - 拍一张 / 录一段视频提问（🎬）：**抽帧和旁白转写都在浏览器本地做**，整段视频不上传
-- 数据（资料 / 对话 / 声纹 / API Key）**全部只存在这台设备**，没有服务器经手
+- 数据（资料 / 对话 / 声纹 / API Key）**都存在这台设备的浏览器里**，没有自己的服务器经手
 
-**和服务器版差什么**（只剩一样）：**跨设备共享**（手机电脑看同一份资料与历史）——
-那需要一个"公共的家"，也就是服务器。其余功能单文件版都能自己跑。
+**和服务器版差什么**：
+
+- **跨设备共享**（手机电脑看同一份资料与历史）——那需要一个"公共的家"，也就是服务器；
+- 还有三样只有服务器版有：**自动挡（浏览器端 VAD）**、**思考档四档**、**垫场话**。
+
+另外两点如实说明：导入 PDF 时会从第三方 CDN（jsdelivr / unpkg / bootcdn）加载 pdf.js 与
+jszip，声纹推理会加载 onnxruntime-web；开了联网搜索则问题原文会发给 Tavily。
+**API Key 存在同源 localStorage 里**（没有服务器经手，但这意味着第三方脚本一旦被劫持就能读到它）。
+介意的话：把 libs 本地化（改 `standalone.html` 里的 CDN 地址），或干脆用服务器版。
 
 > ⚠️ 手机要用摄像头必须 **https 或 localhost**（浏览器硬性要求）。用静态托管最省事。
 > 界面语言：中文。用 `file://` 直接打开通常也可以，但部分浏览器会挡摄像头/模块脚本。
@@ -134,21 +166,27 @@ cp lab_context.example.md lab_context.md # 写你自己那门课的设备与实�
 ## 换模型 / 换供应商
 
 全部走环境变量（见 `.env.example`）：`LAB_MODEL` 对话主模型、`LAB_OCR_MODEL` 读照片的视觉模型、
-`LAB_ASR_MODEL` 语音转文字。默认实现是 DeepSeek + 阿里百炼（都兼容 OpenAI 协议），
-换成别家只要改 `lab_server.py` 里的 base_url 与 key 变量。
+`LAB_ASR_MODEL` 语音转文字。默认实现是 DeepSeek + 阿里百炼（都兼容 OpenAI 协议）。
+
+换别家的**接口地址**时改 `lab_server.py` 顶部的常量（也都能用环境变量覆盖）：
+`LAB_DEEPSEEK_BASE`（模型名以 `deepseek` 开头时走它）、`LAB_VISION_BASE`、`LAB_ASR_BASE`，
+以及 `LAB_VISION_KEY` / `LAB_ASR_KEY`（视觉/听写想用另一个 key 时填）。
+`.env.example` 里给了五家的现成组合，照抄改模型名即可。
 
 ## 已知取舍
 
 - **轮次模式**（不是流式）：答得透但有 3~9 秒等待，用"垫场话"缓解；要低延迟得换实时模型。
-- 自动挡首次会下 ~2.9MB 的推理引擎（已 gzip），弱网下可能失败——会提示并可重试。
-- 抽帧按时长自适应（≤20s 每 2s 一帧 / ≤60s 每 4s / 更长每 8s），对齐官方 1 帧/秒量级的口径。
+- 自动挡首次会下 ~2.8MB 的推理引擎（gzip 后），弱网下可能失败——会提示并可重试。
+- 抽帧按时长自适应（≤20s 每 2s 一帧 / ≤60s 每 4s / 更长每 8s，单段视频最多 12 帧；对话内的视频最多 6 帧）。
+- 单文件版是固定 4 帧（浏览器里跑，帧数写死更省事）。
 - 没做端侧部署、没有工具调用（实验台上需要的是"告诉我怎么做"，不是"替我做"）。
+- 日志默认只记长度、不记提问/转写原文（要调试可以设 `LAB_LOG_CONTENT=1`）。
 
 ## 常见问题（FAQ）
 
 **摄像头打不开？** 浏览器硬性要求 **https 或 localhost**；`file://` 直接打开时有些浏览器会拦。用静态托管最省事。
 
-**"自动挡"提示加载失败？** 首次要下 ~2.9MB 的推理引擎（已 gzip）；弱网会失败——**再点一次会自动重试**（不用刷新页面）。
+**"自动挡"提示加载失败？** 首次要下 ~2.8MB 的推理引擎（gzip 后）；弱网会失败——**再点一次会自动重试**（不用刷新页面）。
 
 **声纹模型从哪来？** 单文件版默认取同目录 `./campplus.onnx`，也可以在设置里填 URL。
 模型是 [CAM++ 中英文通用版](https://www.modelscope.cn/models/iic/speech_campplus_sv_zh_en_16k-common_advanced)（28MB）。
@@ -158,8 +196,9 @@ cp lab_context.example.md lab_context.md # 写你自己那门课的设备与实�
 看图听写用另一家也行（预设下面「看图/听写想用另一家」）。服务器版改 `.env` 里的 base URL 与模型名即可，
 见 `.env.example` 里的服务商清单。
 
-**数据会上传吗？** 单文件版：资料 / 对话 / 声纹 / Key **只存在本机浏览器**，提问时只有"这一轮的画面和文字"
-发给你自己填的那个模型 API。服务器版同理，只是多了一台你自己的机器。
+**数据会上传吗？** 单文件版：资料 / 对话 / 声纹 / Key **存在本机浏览器**，提问时只有"这一轮的画面和文字"
+发给你自己填的那个模型 API；另外导入 PDF/Word 会从第三方 CDN 取代码、开了联网搜索会把问题发给 Tavily
+（详见上面「和服务器版差什么」）。服务器版同理，只是多了一台你自己的机器；服务端日志默认不记提问原文。
 
 **为什么不用手机上现成的 App？** 因为"手上有仪器、边做边问"需要三件事：你的课程资料在上下文里、
 能对着设备拍、回答短而准。通用 App 做不到，而这份代码可以按你自己那门课改。
@@ -171,10 +210,12 @@ cp lab_context.example.md lab_context.md # 写你自己那门课的设备与实�
 - [x] 界面中/英双语（auto 按浏览器语言 + 可切换；加语言＝往 `static/i18n.js` 加一份表）
 - [x] **无服务器单文件版**（`standalone.html`）：资料库 / 多会话 / 语音播报 / 联网搜索 / **声纹** 全在浏览器里，只有跨设备依赖服务器
 - [x] 对话里直接发视频提问（🎬 抽帧 + 旁白转写）
-- [ ] 换其它供应商的开箱支持（OpenAI / Gemini / 本地 Ollama）
+- [x] 单文件版的服务商预设（百炼 / OpenAI / DeepSeek / 硅基流动 / 智谱 / Kimi / 本地 Ollama / 自定义）
+- [x] 服务器版的屏幕共享（投屏）；**平板 / 横屏适配还没做**
+- [x] 可选访问口令（`LAB_TOKEN`，默认关）
+- [ ] 服务器版也接多家供应商（现在换家要手改 base：`LAB_VISION_BASE` 等）
 - [ ] 更好的弱网体验（断点续传、离线抽帧）
 - [ ] 一键部署脚本（docker-compose / systemd 模板）
-- [ ] 屏幕共享 / 平板适配
 - [ ] 现成的演示页 / 演示视频（需要有人跑起来后贡献）
 
 ## 一起折腾（欢迎共建）
@@ -198,11 +239,14 @@ cp lab_context.example.md lab_context.md # 写你自己那门课的设备与实�
 
 ## 最近更新
 
+- **2026-09-15** 修掉几个真会绊倒人的问题（`.env` 现在会被读取、`fetch_vad_assets.sh` 能跑通、
+  缺 vad 资源不再启动即崩、`/ask` 带图不再 500、资料 id 不再撞车）；新增**可选访问口令**；
+  依赖里的 PyMuPDF（AGPL）换成 pypdfium2（宽松许可）
 - **2026-09-12** 单文件版升级为**全量版**（本机资料库 / 多会话 / 语音播报 / 联网搜索 / **浏览器里跑声纹**）；
   🎬 对话里直接发视频提问（抽帧 + 旁白转写）
-- **2026-09-12** 资料库支持视频；自动挡 VAD 改成按需加载 + gzip（11MB → 2.9MB）
-- **2026-09-11** 界面中/英双语；README 与脱敏外壳整理
+- **2026-09-12** 资料库支持视频；自动挡 VAD 改成按需加载 + gzip（11MB → 2.8MB）
+- **2026-09-12** 界面中/英双语；README 与脱敏外壳整理
 
 ## 许可
 
-MIT
+MIT，第三方组件许可见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。

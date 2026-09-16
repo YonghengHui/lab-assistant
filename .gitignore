@@ -18,3 +18,11 @@ test_*.py
 *.wav
 *.mp3
 *.png
+
+# 运行时会生成在仓库根目录（别提交：可能带实验分组名/资料内容）
+active_group.txt
+merged_*.pdf
+
+# README 里的真机截图是要提交的，别被上面的 *.png 挡掉
+!assets/
+!assets/*.png

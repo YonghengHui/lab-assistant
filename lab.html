@@ -175,7 +175,7 @@
     <div id="doclist" style="margin-top:10px"></div>
     <div class="hint">一次实验一组。只有「当前实验」的资料会喂给模型，避免混淆。<br>
       <b>纸质指导书拍照就能上传</b>（自动 OCR 成文字）；多页可以一次选多张。<br>
-      <b>录一段视频也能传</b>：自动抽 8 帧看画面，<b>并把你视频里的旁白转成文字</b>——一边拍一边说最省事。</div>
+      <b>录一段视频也能传</b>：自动抽帧看画面（视频越长间隔越大），<b>并把你视频里的旁白转成文字</b>——一边拍一边说最省事。</div>
   </div>
 </div>
 
@@ -331,10 +331,14 @@ let zoom = 1, nativeZoom = false;      // 缩放：优先用镜头原生 zoom，
 
 async function openCam() {
   try {
-    camStream = await navigator.mediaDevices.getUserMedia({
+    const s = await navigator.mediaDevices.getUserMedia({
       // 分辨率别要太大：安卓 WebView 上过大可能忽略 facingMode / 导致黑屏
       video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
     });
+    // 等权限弹窗/等设备返回期间，用户可能已经点了「视频：关」——这条流那时还没赋给 camStream，
+    // closeCam() 看不到它，会一直亮着并占着摄像头。拿回来先核对意图，不要了就自己关掉。
+    if (!vidOn) { s.getTracks().forEach(t => t.stop()); return; }
+    camStream = s;
     const v = $('thumb');
     v.srcObject = camStream;
     v.muted = true;
@@ -872,6 +876,7 @@ async function ensureVadLibs() {
 }
 
 async function startAuto() {
+  if (myvad) return;                     // 已经在自动挡：再点一次不能又起一个（会每句话问两遍 + 麦克风泄漏）
   if (!(window.vad && window.vad.MicVAD)) {
     const ok = await ensureVadLibs();
     if (!ok) {
@@ -941,6 +946,7 @@ async function stopAuto() {
 
 /* ================= 挡位切换 ================= */
 function setMode(m) {
+  if (m === mode && (m !== 'auto' || myvad)) return;    // 重复点同一个挡位就直接忽略
   mode = m;
   saveSetting('mode', m);
   document.querySelectorAll('#mode button').forEach(b => b.classList.toggle('act', b.dataset.m===m));
@@ -1080,16 +1086,17 @@ $('enroll').onclick = async () => {
 
 /* 用 WebAudio 量一段录音的平均音量，判断是不是太小声 */
 async function blobLevel(blob) {
+  let ac = null;
   try {
-    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    ac = new (window.AudioContext || window.webkitAudioContext)();
     const buf = await ac.decodeAudioData(await blob.arrayBuffer());
     const d = buf.getChannelData(0);
     let sum = 0;
     for (let i = 0; i < d.length; i += 16) sum += d[i] * d[i];
     const rms = Math.sqrt(sum / (d.length / 16));
-    await ac.close();
     return rms;
   } catch (_) { return 1; }        // 解码失败就别拦
+  finally { if (ac) { try { await ac.close(); } catch (_) {} } }   // 不 close 会攒到浏览器上限（约 6）→ 录音全挂
 }
 
 /* ================= 历史会话 ================= */

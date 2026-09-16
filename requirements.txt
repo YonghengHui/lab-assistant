@@ -4,6 +4,6 @@ numpy
 pillow
 edge-tts
 sherpa-onnx
-pymupdf
+pypdfium2
 python-docx
 python-pptx

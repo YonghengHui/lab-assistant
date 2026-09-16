@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import glob
+import hmac
 import json
 import logging
 import os
@@ -21,6 +22,8 @@ import re
 import subprocess
 import tempfile
 import time
+import urllib.parse
+import uuid
 from pathlib import Path
 from collections import deque
 
@@ -31,6 +34,38 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("lab")
 
 HERE = Path(__file__).parent
+
+
+def _load_dotenv(path: Path) -> None:
+    """极简 .env 读取（不引额外依赖）：KEY=VALUE / export KEY=VALUE，# 注释、
+    行尾注释、成对引号都处理；**已存在的环境变量优先**（systemd EnvironmentFile /
+    shell 里的 export 不会被本文件覆盖）。"""
+    try:
+        if not path.exists():
+            return
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except Exception as e:
+        log.warning("读取 %s 失败: %s", path, e)
+        return
+    n = 0
+    for line in lines:
+        m = re.match(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$", line)
+        if not m:
+            continue
+        k, v = m.group(1), m.group(2).strip()
+        if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+            v = v[1:-1]
+        else:
+            v = re.split(r"\s+#", v, 1)[0].strip()      # 去掉行尾注释（.env.example 里每行都有）
+        if k not in os.environ:
+            os.environ[k] = v
+            n += 1
+    if n:
+        log.info("从 %s 读了 %d 个变量", path.name, n)
+
+
+_load_dotenv(HERE / ".env")
+
 HOST = os.environ.get("LAB_HOST", "127.0.0.1")
 PORT = int(os.environ.get("LAB_PORT", "8901"))
 CERT = HERE / "cert.pem"
@@ -39,15 +74,25 @@ KEY = HERE / "key.pem"
 DEEPSEEK_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 ASR_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
 TAVILY_KEY = os.environ.get("TAVILY_API_KEY", "")
-DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
-MODEL = os.environ.get("LAB_MODEL", "deepseek-v4.1-flash-expires-on-0910")
+
+# ── 服务商地址（都在这里改，别去翻函数里的字面量）────────────────────
+# 规则：模型名以 deepseek 开头 → 走 DEEPSEEK_URL；其余（视觉/听写）→ 走 VISION_URL / ASR_URL
+DEEPSEEK_URL = os.environ.get("LAB_DEEPSEEK_BASE", "https://api.deepseek.com/v1").rstrip("/") + "/chat/completions"
+DEFAULT_VL_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+VISION_URL = os.environ.get("LAB_VISION_BASE", DEFAULT_VL_BASE).rstrip("/") + "/chat/completions"
+ASR_URL = os.environ.get("LAB_ASR_BASE", DEFAULT_VL_BASE).rstrip("/") + "/chat/completions"
+# 视觉/听写默认复用 DASHSCOPE_API_KEY；换别家时用 LAB_VISION_KEY / LAB_ASR_KEY 单独给
+VISION_KEY = os.environ.get("LAB_VISION_KEY", "") or ASR_KEY
+ASR_API_KEY = os.environ.get("LAB_ASR_KEY", "") or ASR_KEY
+
+MODEL = os.environ.get("LAB_MODEL", "deepseek-chat")
 # 语音转文字用的模型（浏览器录音、视频旁白共用）
 ASR_MODEL_NAME = os.environ.get("LAB_ASR_MODEL", "qwen3-asr-flash")
 
 # 拍纸质指导书走的 OCR 视觉模型（.env 里改这两行即可换模型，不用动代码）
 # 主模型读空/报错时会自动用兜底模型重试一次
-OCR_MODEL = os.environ.get("LAB_OCR_MODEL", "deepseek-v4.1-flash-expires-on-0910")
-OCR_FALLBACK = os.environ.get("LAB_OCR_FALLBACK", "qwen3.5-omni-plus")
+OCR_MODEL = os.environ.get("LAB_OCR_MODEL", "qwen-vl-max")
+OCR_FALLBACK = os.environ.get("LAB_OCR_FALLBACK", "qwen-vl-plus")
 OCR_PROMPT = ("这是一份实验指导书/讲义的照片，可能因为手抖、光线不好而有些模糊或倾斜。"
               "请把上面所有能看清的文字按原结构完整提取出来（标题、编号、公式、表格都保留），"
               "不要总结、不要解释、不要加自己的话，只输出提取到的文字本身，不要任何开场白或说明。"
@@ -59,6 +104,15 @@ VIDEO_PROMPT = ("这是实验课上用手机拍的短视频的一帧。用 3~6 �
                 "有清晰文字或数据表就照抄读出来。看不清就说看不清，不要猜。")
 VIDEO_EXTS = (".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm", ".3gp")
 VIDEO_MAX_FRAMES = int(os.environ.get("LAB_VIDEO_FRAMES", "12"))
+MAX_TEXT = 4000                         # 单条提问/历史的最大字数（防超大 prompt 烧钱）
+# 日志里是否记录提问 / 转写原文。默认不记（实验室里的提问常带人名、学号、实验数据，
+# 而这些日志会落到 journald/文件里）；想调试就设 LAB_LOG_CONTENT=1。
+LOG_CONTENT = os.environ.get("LAB_LOG_CONTENT", "0").strip().lower() in ("1", "true", "yes", "on")
+
+
+def brief(s: str, n: int = 40) -> str:
+    s = s or ""
+    return repr(s[:n]) if LOG_CONTENT else f"<{len(s)} 字>"
 # 多张图打包成一次请求时，要求它分页输出，好还原每页对应关系
 MULTI_OCR_HINT = "\n若一次给了多张图，请按顺序分别输出，每张开头写【第 k 页】，不要合并成一段。"
 
@@ -135,6 +189,20 @@ DOC_CHAR_LIMIT = 24000                  # 单次塞进提示词的总字数上�
 DOC_ONE_LIMIT = 20000                   # 单个文档的字数上限
 
 
+def new_doc_id() -> str:
+    """资料 id：不能用毫秒时间戳——一次上传多份文件时同毫秒会撞 id，
+    删一份会把同 id 的几条一起删掉、预览永远只取到第一条。"""
+    return "d" + uuid.uuid4().hex[:12]
+
+
+def to_int(v, default: int = 0) -> int:
+    """客户端给了非数字（如 "30 秒"）时别让 int() 抛出 → 500，退回默认值。"""
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
 def load_docs():
     global _docs
     try:
@@ -159,11 +227,16 @@ def extract_text(path: str, filename: str) -> str:
     low = filename.lower()
     try:
         if low.endswith(".pdf"):
-            import pymupdf
-            doc = pymupdf.open(path)
+            import pypdfium2 as pdfium       # Apache-2.0/BSD-3，替代 AGPL 的 PyMuPDF
+            doc = pdfium.PdfDocument(path)
             parts = []
             for i, page in enumerate(doc):
-                parts.append(f"[第{i+1}页]\n" + page.get_text())
+                try:
+                    txt = page.get_textpage().get_text_range()
+                except Exception:
+                    txt = ""
+                parts.append(f"[第{i+1}页]\n" + (txt or ""))
+            doc.close()
             return "\n".join(parts)
         if low.endswith(".docx"):
             import docx
@@ -216,8 +289,8 @@ async def _vl_multi(model: str, imgs: list[str], prompt: str) -> str:
     只在图片少（≤2 张）时用：输出要挤在同一个 max_tokens 里，张数一多会被截断。
     """
     ds = model.lower().startswith("deepseek")
-    url = DEEPSEEK_URL if ds else "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-    key = DEEPSEEK_KEY if ds else ASR_KEY
+    url = DEEPSEEK_URL if ds else VISION_URL
+    key = DEEPSEEK_KEY if ds else VISION_KEY
     content = [{"type": "image_url",
                 "image_url": {"url": f"data:image/jpeg;base64,{b}"}} for b in imgs]
     content.append({"type": "text", "text": prompt})
@@ -236,8 +309,8 @@ async def _vl_multi(model: str, imgs: list[str], prompt: str) -> str:
 async def _vl_once(model: str, img_b64: str, prompt: str = OCR_PROMPT) -> str:
     """调一次视觉模型做 OCR。deepseek* 走 DeepSeek 官方接口，其余走百炼。"""
     ds = model.lower().startswith("deepseek")
-    url = DEEPSEEK_URL if ds else "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-    key = DEEPSEEK_KEY if ds else ASR_KEY
+    url = DEEPSEEK_URL if ds else VISION_URL
+    key = DEEPSEEK_KEY if ds else VISION_KEY
     body = {
         "model": model,
         "messages": [{"role": "user", "content": [
@@ -274,8 +347,8 @@ async def video_transcript(path: str) -> str:
                      "input_audio": {"data": f"data:audio/wav;base64,{b64}"}}]}]}
         async with aiohttp.ClientSession() as s:
             async with s.post(
-                "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-                headers={"Authorization": f"Bearer {ASR_KEY}"}, json=body,
+                ASR_URL,
+                headers={"Authorization": f"Bearer {ASR_API_KEY}"}, json=body,
                 timeout=aiohttp.ClientTimeout(total=180),
             ) as r:
                 d = await r.json()
@@ -357,46 +430,63 @@ async def ocr_image(path: str, filename: str) -> str:
 
 
 def images_to_pdf(paths: list[str], out: str):
-    """多张照片合成一个 PDF（用户说的"整理成 PDF"）。"""
-    import pymupdf
-    doc = pymupdf.open()
-    for p in paths:
-        img = pymupdf.open(p)
-        rect = img[0].rect
-        page = doc.new_page(width=rect.width, height=rect.height)
-        page.insert_image(rect, filename=p)
-        img.close()
-    doc.save(out)
-    doc.close()
+    """多张照片合成一个 PDF（用户说的"整理成 PDF"）。用 Pillow，不再依赖 PyMuPDF。"""
+    from PIL import Image
+    imgs = []
+    try:
+        for p in paths:
+            im = Image.open(p)
+            if im.mode not in ("RGB", "L"):
+                im = im.convert("RGB")
+            imgs.append(im)
+        if not imgs:
+            raise ValueError("没有图片")
+        imgs[0].save(out, "PDF", save_all=True, append_images=imgs[1:], resolution=150)
+    finally:
+        for im in imgs:
+            try:
+                im.close()
+            except Exception:
+                pass
     return out
 
 
 async def docs_merge(request: web.Request) -> web.Response:
-    """把已经上传的图片资料合并成一个 PDF 文件（可下载/归档）。"""
+    """把已经上传的图片资料合并成一个 PDF（下载/归档）。
+
+    注：页面目前没有入口调用它（预留接口）。成品走临时文件、响应后即删，
+    不再往仓库根目录扔 merged_*.pdf。
+    """
     global _docs
     try:
         d = await request.json()
     except Exception:
         return web.json_response({"error": "参数错误"}, status=400)
     ids = d.get("ids") or []
-    group = str(d.get("group") or "")
     picks = [x for x in _docs if x["id"] in ids and x.get("images")]
     if not picks:
         return web.json_response({"error": "选中的资料里没有图片"}, status=400)
-    paths, tmpfiles = [], []
+    paths, tmpfiles, out = [], [], None
     try:
         for doc in picks:
             for b64s in doc["images"]:
                 t = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
                 t.write(base64.b64decode(b64s)); t.close()
                 paths.append(t.name); tmpfiles.append(t.name)
-        out = str(SESS_DIR.parent / f"merged_{int(time.time())}.pdf")
+        tf = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+        tf.close()
+        out = tf.name
         images_to_pdf(paths, out)
-        return web.json_response({"ok": True, "file": os.path.basename(out)})
+        with open(out, "rb") as f:
+            data = f.read()
+        return web.Response(body=data, content_type="application/pdf",
+                            headers={"Content-Disposition": 'attachment; filename="merged.pdf"'})
     finally:
-        for p in tmpfiles:
+        for p in tmpfiles + ([out] if out else []):
             try: os.unlink(p)
             except Exception: pass
+
+
 async def docs_upload(request: web.Request) -> web.Response:
     """上传资料：multipart（group 指定实验分组，docname 指定合并名）。
 
@@ -522,7 +612,7 @@ async def docs_upload(request: web.Request) -> web.Response:
             else:
                 t2 = text[:DOC_ONE_LIMIT]
                 name = fn if kind == "doc" else (docname or f"视频：{fn}")
-                doc = {"id": f"d{int(_t.time()*1000)}", "name": name, "text": t2,
+                doc = {"id": new_doc_id(), "name": name, "text": t2,
                        "added": _t.time(), "chars": len(t2), "group": grp, "kind": kind}
                 _docs.append(doc)
                 added.append({"name": name, "ok": True, "chars": len(t2), "kind": kind})
@@ -535,7 +625,7 @@ async def docs_upload(request: web.Request) -> web.Response:
             for i, (pn, pt) in enumerate(img_pages, 1):
                 body.append(f"\n\n===== 第 {i} 页（{pn}） =====\n{pt}")
             full = "".join(body).strip()[:DOC_ONE_LIMIT]
-            doc = {"id": f"d{int(_t.time()*1000)}", "name": merged_name, "text": full,
+            doc = {"id": new_doc_id(), "name": merged_name, "text": full,
                    "added": _t.time(), "chars": len(full), "group": grp,
                    "kind": "image", "pages": len(img_pages)}
             _docs.append(doc)
@@ -547,6 +637,13 @@ async def docs_upload(request: web.Request) -> web.Response:
     except Exception as e:
         log.error("upload failed: %s", e)
         return web.json_response({"error": str(e)[:200]}, status=500)
+    finally:
+        # 上传中途断网/报错时上面的循环没跑到，这里兜底把临时文件删干净（否则永久残留在 /tmp）
+        for _fn, _tmp, _kind in pending:
+            try:
+                os.unlink(_tmp)
+            except Exception:
+                pass
 
 
 def docs_brief():
@@ -1172,15 +1269,15 @@ async def stt(request: web.Request) -> web.Response:
             audio_b64 = _b64.b64encode(f.read()).decode()
 
         body = {
-            "model": "qwen3-asr-flash",
+            "model": ASR_MODEL_NAME,
             "messages": [{"role": "user", "content": [
                 {"type": "input_audio", "input_audio": {"data": f"data:audio/wav;base64,{audio_b64}"}}
             ]}],
         }
         async with aiohttp.ClientSession() as s:
             async with s.post(
-                "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-                headers={"Authorization": f"Bearer {ASR_KEY}"},
+                ASR_URL,
+                headers={"Authorization": f"Bearer {ASR_API_KEY}"},
                 json=body, timeout=aiohttp.ClientTimeout(total=60),
             ) as r:
                 data = await r.json()
@@ -1192,8 +1289,8 @@ async def stt(request: web.Request) -> web.Response:
             pass
         if not text:
             log.warning("asr raw: %s", json.dumps(data)[:300])
-        log.info("stt: %d bytes spk=%s(%.3f) -> %r", len(raw),
-                 spk_ok, spk_score if spk_score is not None else -1, text[:50])
+        log.info("stt: %d bytes spk=%s(%.3f) -> %s", len(raw),
+                 spk_ok, spk_score if spk_score is not None else -1, brief(text, 50))
         return web.json_response({"text": text, "speaker_ok": spk_ok,
                                   "score": round(spk_score, 4) if spk_score is not None else None,
                                   "error": None if text else json.dumps(data)[:200]})
@@ -1305,19 +1402,25 @@ async def ask(request: web.Request) -> web.Response:
     except Exception:
         return web.json_response({"error": "bad json"}, status=400)
 
-    question = (payload.get("question") or "").strip()
+    # 语言（中/英）在这里就定下来：下面构造内容时要用，别再往下放（历史上放过一次 → 主路径全 500）
+    lang = str(payload.get("lang") or os.environ.get("LAB_LANG") or "zh").lower()
+    zh = not lang.startswith("en")
+
+    question = str(payload.get("question") or "").strip()[:MAX_TEXT]
     image = payload.get("image")
     images = payload.get("images") or []
+    if not isinstance(images, list):
+        images = []
     if image and not images:
         images = [image]
-    images = [i for i in images if i][:6]        # 最多 6 张（回带窗口用）
+    images = [i for i in images if isinstance(i, str) and i][:6]        # 最多 6 张（回带窗口用）
     if len(images) > 1:
         _before = len(images)
         images = _dedupe_frames(images)
         if len(images) != _before:
             log.info("画面去重 %d → %d 张（几乎没变的帧不发，省 token）", _before, len(images))
     # 摄像头关着也照样带画面：客户端把最后拍到的几帧发过来（stale_sec > 0 表示是"旧照"）
-    stale_sec = int(payload.get("stale_sec") or 0)
+    stale_sec = to_int(payload.get("stale_sec"), 0)
     # 客户端一张都没带时，用服务端缓存的最近帧顶上（不再限制时间窗：关掉摄像头后仍要能问）
     if not images and _live_frames:
         _now = time.time()
@@ -1327,6 +1430,8 @@ async def ask(request: web.Request) -> web.Response:
             stale_sec = int(_now - _recent[-1][0])
             log.info("ask: 用服务端缓存帧 %d 张顶上，最新一帧 %.1f 秒前", len(images), _now - _recent[-1][0])
     history = payload.get("history") or []
+    if not isinstance(history, list):
+        history = []
 
     if not question and not images:
         return web.json_response({"error": "没有内容" if zh else "empty request"}, status=400)
@@ -1336,7 +1441,7 @@ async def ask(request: web.Request) -> web.Response:
         content.append({"type": "text", "text": question})
     else:
         content.append({"type": "text", "text": "看看这个，告诉我该怎么做。" if zh else "Look at this and tell me what to do."})
-    frames_span = int(payload.get("frames_span") or 0)
+    frames_span = to_int(payload.get("frames_span"), 0)
     if len(images) > 1:
         if zh:
             _span = f"，覆盖最近约 {frames_span} 秒" if frames_span else ""
@@ -1362,8 +1467,6 @@ async def ask(request: web.Request) -> web.Response:
             search_snippet = await web_search(question)
             search_used = bool(search_snippet)
 
-    lang = str(payload.get("lang") or os.environ.get("LAB_LANG") or "zh").lower()
-    zh = not lang.startswith("en")
     msgs = [{"role": "system", "content": current_prompt(lang)}]
     _docs_ctx = docs_context(payload.get("group"))
     if _docs_ctx:
@@ -1371,8 +1474,11 @@ async def ask(request: web.Request) -> web.Response:
                                                  "[Course material] (base your answer on this first)\n") + _docs_ctx})
     _n = _history_limit * 2 if _history_limit else 0
     for h in (history[-_n:] if _n else []):      # 按设定带上最近几轮
-        if h.get("role") in ("user", "assistant") and h.get("content"):
-            msgs.append({"role": h["role"], "content": h["content"]})
+        if not isinstance(h, dict):              # history 里混进字符串会 AttributeError → 500
+            continue
+        role, cont = h.get("role"), h.get("content")
+        if role in ("user", "assistant") and isinstance(cont, str) and cont.strip():
+            msgs.append({"role": role, "content": cont[:MAX_TEXT]})
     msgs.append({"role": "user", "content": content})
     if search_snippet:
         msgs.append({"role": "user", "content": "【联网资料】\n" + search_snippet})
@@ -1398,7 +1504,7 @@ async def ask(request: web.Request) -> web.Response:
         body["thinking"] = {"type": "enabled"}
         body["reasoning_effort"] = effort
 
-    log.info("ask: q=%r img=%s", question[:60], bool(image))
+    log.info("ask: q=%s img=%s", brief(question, 60), bool(image))
     try:
         async with aiohttp.ClientSession() as s:
             async with s.post(
@@ -1423,8 +1529,8 @@ async def ask(request: web.Request) -> web.Response:
         log.warning("ask: 空答案（out=%s reason=%s, effort=%s）",
                     _u.get("completion_tokens"), _reason, effort)
         answer = "（这次只出了思考、没给答案——把「思考」档调到“无”再问一次，或问短一点。）"
-    log.info("ask: q=%r img=%d | in=%s hit=%s miss=%s out=%s reason=%s | 搜=%s",
-             question[:40], len(images),
+    log.info("ask: q=%s img=%d | in=%s hit=%s miss=%s out=%s reason=%s | 搜=%s",
+             brief(question, 40), len(images),
              _u.get("prompt_tokens"), _u.get("prompt_cache_hit_tokens"),
              _u.get("prompt_cache_miss_tokens"), _u.get("completion_tokens"),
              _reason,
@@ -1489,6 +1595,10 @@ async def vad_wasm(request: web.Request) -> web.Response:
         log.info("wasm 走 gzip（%.1fMB）", gz.stat().st_size / 1e6)
         return web.FileResponse(gz, headers={"Content-Encoding": "gzip",
                                              "Content-Type": "application/wasm"})
+    if not raw.exists():
+        # 新克隆的仓库里 static/vad 是空的：给 404 + 人话，别抛 FileNotFoundError（那是 500）
+        return web.json_response(
+            {"error": "没有 vad 静态资源，先跑 bash scripts/fetch_vad_assets.sh"}, status=404)
     return web.FileResponse(raw, headers={"Content-Type": "application/wasm"})
 
 
@@ -1501,11 +1611,82 @@ def ssl_ctx():
     return None
 
 
+# ── 可选鉴权（默认关闭）──────────────────────────────────────────────
+# LAB_TOKEN 留空 = 不鉴权（局域网 / Tailscale 直连的默认用法，行为跟以前完全一样）；
+# 想把服务暴露到公网，就在 .env 里设一个长随机串，之后页面/接口/静态资源全要带 token。
+LAB_TOKEN = os.environ.get("LAB_TOKEN", "").strip()
+COOKIE_NAME = "lab_token"
+
+
+def _token_ok(request: web.Request) -> bool:
+    if not LAB_TOKEN:
+        return True
+    auth = request.headers.get("Authorization", "")
+    got = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+    got = got or request.query.get("token", "") or request.cookies.get(COOKIE_NAME, "")
+    return bool(got) and hmac.compare_digest(got, LAB_TOKEN)
+
+
+LOGIN_PAGE = """<!doctype html><html lang="zh"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>实验助手 · 登录</title>
+<style>body{font-family:system-ui,-apple-system,sans-serif;margin:0;display:flex;height:100vh;
+align-items:center;justify-content:center;background:#111;color:#eee}
+form{display:flex;gap:8px}input{padding:10px 12px;border-radius:8px;border:1px solid #444;
+background:#1b1b1b;color:#eee;font-size:16px}button{padding:10px 16px;border:0;border-radius:8px;
+background:#3b82f6;color:#fff;font-size:16px}</style>
+<form method="post" action="/login"><input name="token" type="password" placeholder="访问口令" autofocus>
+<button type="submit">进入</button></form></html>"""
+
+
+async def login_page(request: web.Request) -> web.Response:
+    if not LAB_TOKEN:
+        raise web.HTTPFound("/")
+    return web.Response(text=LOGIN_PAGE, content_type="text/html")
+
+
+async def login_submit(request: web.Request) -> web.Response:
+    if not LAB_TOKEN:
+        raise web.HTTPFound("/")
+    try:
+        data = await request.post()
+        tok = str(data.get("token") or "")
+    except Exception:
+        tok = ""
+    if not hmac.compare_digest(tok, LAB_TOKEN):
+        log.info("登录失败（口令不对）来自 %s", request.remote)
+        raise web.HTTPFound("/login")
+    nxt = request.query.get("next") or "/"
+    if not nxt.startswith("/") or nxt.startswith("//"):
+        nxt = "/"                       # 只允许站内跳转，防开放重定向
+    resp = web.HTTPFound(nxt)
+    resp.set_cookie(COOKIE_NAME, LAB_TOKEN, httponly=True, samesite="Lax",
+                    max_age=30 * 24 * 3600)
+    return resp
+
+
+async def logout(request: web.Request) -> web.Response:
+    resp = web.HTTPFound("/login")
+    resp.del_cookie(COOKIE_NAME)
+    return resp
+
+
+@web.middleware
+async def auth_middleware(request: web.Request, handler):
+    if _token_ok(request) or request.path in ("/login", "/logout", "/health"):
+        return await handler(request)          # /health 放行，方便探活
+    if request.method in ("GET", "HEAD") and "text/html" in (request.headers.get("Accept") or ""):
+        nxt = urllib.parse.quote(str(request.rel_url), safe="/?=&")
+        raise web.HTTPFound(f"/login?next={nxt}")
+    return web.json_response({"error": "需要访问口令（在 .env 里设 LAB_TOKEN，或用 ?token= 带上）"},
+                             status=401)
+
+
 def main():
     if not DEEPSEEK_KEY:
         log.error("缺少 DEEPSEEK_API_KEY")
         return
-    app = web.Application(client_max_size=32 * 1024 * 1024)
+    app = web.Application(middlewares=[auth_middleware], client_max_size=32 * 1024 * 1024)
     app.router.add_get("/", index)
     app.router.add_get("/health", health)
     app.router.add_post("/ask", ask)
@@ -1529,17 +1710,22 @@ def main():
     app.router.add_delete("/docs/{did}", docs_delete)
     app.router.add_get("/prompt", prompt_get)
     app.router.add_post("/prompt", prompt_set)
+    # 可选鉴权的登录页（LAB_TOKEN 为空时这两条直接跳首页，等于不存在）
+    app.router.add_get("/login", login_page)
+    app.router.add_post("/login", login_submit)
+    app.router.add_get("/logout", logout)
     # 先注册 wasm 的 gzip 直发路由，再挂静态目录（aiohttp 按注册顺序匹配）
     app.router.add_get("/vad/ort-wasm-simd-threaded.wasm", vad_wasm)
     app.router.add_get("/i18n.js", lambda r: web.FileResponse(HERE / "static" / "i18n.js",
                                                               headers={"Content-Type": "application/javascript"}))
+    (HERE / "static" / "vad").mkdir(parents=True, exist_ok=True)   # 缺目录时 add_static 会抛异常起不来
     app.router.add_static("/vad/", HERE / "static" / "vad")
     load_voiceprint()
     load_docs()
     load_prompt()
     ctx = ssl_ctx()
-    log.info("lab assistant on %s://%s:%d  model=%s",
-             "https" if ctx else "http", HOST, PORT, MODEL)
+    log.info("lab assistant on %s://%s:%d  model=%s  鉴权=%s",
+             "https" if ctx else "http", HOST, PORT, MODEL, "开" if LAB_TOKEN else "关")
     web.run_app(app, host=HOST, port=PORT, ssl_context=ctx, print=None, access_log=None)
 
 

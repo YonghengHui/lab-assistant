@@ -105,6 +105,8 @@
     <select id="c_auxpreset"></select>
     <input id="c_auxbase" placeholder="接口地址（留空＝同上）" style="margin-top:4px">
     <input id="c_auxkey" type="password" placeholder="它家的 API Key（留空＝用上面那个）" style="margin-top:4px">
+    <input id="c_auxvl" placeholder="它家的视觉模型名（留空＝不用视觉）" style="margin-top:4px">
+    <input id="c_auxasr" placeholder="它家的语音识别模型名（留空＝不用听写）" style="margin-top:4px">
     <div class="hint" id="auxNote"></div>
     <label>联网搜索（可选，填 Tavily key；不填就没有搜索）</label>
     <input id="c_tavily" type="password" placeholder="tvly-...">
@@ -149,7 +151,7 @@ const DEF = {
   base: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   model: 'qwen-plus', vl: 'qwen-vl-max', asr: 'qwen3-asr-flash',
  tavily: '', tts: '1', spkurl: './campplus.onnx', spkth: '0.62',
- preset: 'dashscope', auxpreset: '', auxbase: '', auxkey: '',
+ preset: 'dashscope', auxpreset: '', auxbase: '', auxkey: '', auxvl: '', auxasr: '',
   sys: '你是实验课的现场助教。学生正站在仪器前，用手机拍给你看。\n'
      + '回答要求：只说该做什么，一次 3 步以内；先给判断依据（看到什么），再给动作；不确定就让学生补拍一张。不要长篇原理。'
 };
@@ -222,8 +224,9 @@ function applyPreset(kind, key) {
     if (p.base) $('c_auxbase').value = p.base;
     $('auxNote').textContent = p.note || '';
     if (!p.vl && !p.asr) $('auxNote').textContent = '⚠️ 这家也没有视觉/语音 —— 换一家（推荐阿里百炼）。';
-    if (p.asr && !$('c_asr').value) $('c_asr').value = p.asr;
-    if (p.vl && !$('c_vl').value) $('c_vl').value = p.vl;
+    // 辅家的模型名要写进辅家自己的字段：写成主家的会被发到辅家的地址上 → 必然「模型不存在」
+    $('c_auxvl').value = p.vl || '';
+    $('c_auxasr').value = p.asr || '';
   }
 }
 fillPresetSelects();
@@ -231,6 +234,18 @@ $('c_preset').onchange = () => applyPreset('main', $('c_preset').value);
 $('c_auxpreset').onchange = () => applyPreset('aux', $('c_auxpreset').value);
 const capBase = () => (cfg.auxbase || cfg.base);
 const capKey = () => (cfg.auxkey || cfg.key);
+/* 一次请求该用哪家的 地址/Key/模型名：必须成对取，否则会把主家的模型名发到辅家的接口上 */
+function pickEP(kind) {
+  if (kind === 'vision') {
+    if (cfg.auxvl && (cfg.auxbase || cfg.auxkey)) return { base: capBase(), key: capKey(), model: cfg.auxvl };
+    return { base: cfg.base, key: cfg.key, model: cfg.vl || cfg.model };
+  }
+  if (kind === 'asr') {
+    if (cfg.auxasr && (cfg.auxbase || cfg.auxkey)) return { base: capBase(), key: capKey(), model: cfg.auxasr };
+    return { base: cfg.base, key: cfg.key, model: cfg.asr || '' };
+  }
+  return { base: cfg.base, key: cfg.key, model: cfg.model };
+}
 
 /* ============ 设置 ============ */
 function loadCfg() {
@@ -241,6 +256,7 @@ function loadCfg() {
   $('c_preset').value = cfg.preset || 'dashscope';
   $('c_auxpreset').value = cfg.auxpreset || '';
   $('c_auxbase').value = cfg.auxbase || ''; $('c_auxkey').value = cfg.auxkey || '';
+  $('c_auxvl').value = cfg.auxvl || ''; $('c_auxasr').value = cfg.auxasr || '';
   $('presetNote').textContent = (PROVIDERS[$('c_preset').value] || {}).note || '';
   $('auxNote').textContent = (PROVIDERS[$('c_auxpreset').value] || {}).note || '';
   loadVoiceprint();
@@ -251,12 +267,13 @@ $('cfgClose').onclick = () => $('cfgPanel').style.display = 'none';
 $('cfgSave').onclick = () => {
   cfg = Object.assign(cfg, {
     base: $('c_base').value.trim().replace(/\/$/, ''), key: $('c_key').value.trim(),
-    model: $('c_model').value.trim() || DEF.model, vl: $('c_vl').value.trim() || DEF.vl,
-    asr: $('c_asr').value.trim() || DEF.asr, tavily: $('c_tavily').value.trim(),
+    model: $('c_model').value.trim() || DEF.model, vl: $('c_vl').value.trim(),
+    asr: $('c_asr').value.trim(), tavily: $('c_tavily').value.trim(),
     tts: $('c_tts').value, sys: $('c_sys').value,
     spkurl: $('c_spkurl').value.trim() || DEF.spkurl, spkth: $('c_spkth').value.trim() || DEF.spkth,
     preset: $('c_preset').value, auxpreset: $('c_auxpreset').value,
-    auxbase: $('c_auxbase').value.trim(), auxkey: $('c_auxkey').value.trim() });
+    auxbase: $('c_auxbase').value.trim(), auxkey: $('c_auxkey').value.trim(),
+    auxvl: $('c_auxvl').value.trim(), auxasr: $('c_auxasr').value.trim() });
   localStorage.setItem(LS, JSON.stringify(cfg));
   $('cfgPanel').style.display = 'none'; $('keywarn').style.display = cfg.key ? 'none' : '';
   sys('设置已保存（本机）');
@@ -352,7 +369,10 @@ async function videoFrames(blob, n = 4) {
 async function audioWav16k(blob) {
   let buf; try { buf = await blob.arrayBuffer(); } catch (e) { return null; }
   const ac = new (window.AudioContext || window.webkitAudioContext)();
-  let audio; try { audio = await ac.decodeAudioData(buf.slice(0)); } catch (e) { return null; }
+  let audio;
+  try { audio = await ac.decodeAudioData(buf.slice(0)); }
+  catch (e) { return null; }
+  finally { try { await ac.close(); } catch (e) {} }   // 每次失败都漏一个 AudioContext，攒到上限（约 6）录音就全挂
   const ch = audio.numberOfChannels > 1
     ? (() => { const o = new Float32Array(audio.length);
                for (let c = 0; c < audio.numberOfChannels; c++) { const d = audio.getChannelData(c); for (let i = 0; i < d.length; i++) o[i] += d[i] / audio.numberOfChannels; } return o; })()
@@ -371,11 +391,12 @@ async function audioWav16k(blob) {
 function b64(blob) { return new Promise(res => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.readAsDataURL(blob); }); }
 
 async function asr(blob) {
-  if (!capKey() || !cfg.asr) return '';
+  const ep = pickEP('asr');
+  if (!ep.key || !ep.model) return '';
   const data = await b64(blob);
-  const r = await fetch(capBase() + '/chat/completions', {
-    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + capKey() },
-    body: JSON.stringify({ model: cfg.asr, messages: [{ role: 'user', content: [{ type: 'input_audio', input_audio: { data: 'data:audio/wav;base64,' + data } }] }] })
+  const r = await fetch(ep.base + '/chat/completions', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + ep.key },
+    body: JSON.stringify({ model: ep.model, messages: [{ role: 'user', content: [{ type: 'input_audio', input_audio: { data: 'data:audio/wav;base64,' + data } }] }] })
   });
   const d = await r.json();
   return (d.choices && d.choices[0] && d.choices[0].message.content || '').trim();
@@ -462,10 +483,12 @@ async function ensureLib(what) {
 
 /* --- 各类文件的文字提取 --- */
 async function vlText(dataUrl) {
-  if (!capKey()) throw new Error('没填 API Key');
-  const r = await fetch(capBase() + '/chat/completions', {
-    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + capKey() },
-    body: JSON.stringify({ model: cfg.vl, max_tokens: 1800, messages: [{ role: 'user', content: [
+  const ep = pickEP('vision');
+  if (!ep.key) throw new Error('没填 API Key');
+  if (!ep.model) throw new Error('没填视觉模型名（设置里的「视觉模型」）');
+  const r = await fetch(ep.base + '/chat/completions', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + ep.key },
+    body: JSON.stringify({ model: ep.model, max_tokens: 1800, messages: [{ role: 'user', content: [
       { type: 'text', text: DOC_PROMPT }, { type: 'image_url', image_url: { url: dataUrl } }] }] })
   });
   const d = await r.json();
@@ -720,15 +743,21 @@ async function blobToPcm16k(blob) {
   let ac;
   try { ac = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 }); }
   catch (e) { ac = new (window.AudioContext || window.webkitAudioContext)(); }   // Safari 老版本兜底
-  let audio; try { audio = await ac.decodeAudioData(buf.slice(0)); } catch (e) { return null; }
-  const mix = new Float32Array(audio.length);
-  for (let c = 0; c < audio.numberOfChannels; c++) { const d = audio.getChannelData(c);
-    for (let i = 0; i < d.length; i++) mix[i] += d[i] / audio.numberOfChannels; }
-  if (Math.abs(audio.sampleRate - 16000) < 1) return mix;
-  // 兜底：解码器没按 16k 给（线性重采样，质量一般但能用）
-  const ratio = audio.sampleRate / 16000, n = Math.floor(mix.length / ratio), out = new Float32Array(n);
-  for (let i = 0; i < n; i++) out[i] = mix[Math.floor(i * ratio)];
-  return out;
+  try {
+    let audio;
+    try { audio = await ac.decodeAudioData(buf.slice(0)); } catch (e) { return null; }
+    const rate = audio.sampleRate;
+    const mix = new Float32Array(audio.length);
+    for (let c = 0; c < audio.numberOfChannels; c++) { const d = audio.getChannelData(c);
+      for (let i = 0; i < d.length; i++) mix[i] += d[i] / audio.numberOfChannels; }
+    if (Math.abs(rate - 16000) < 1) return mix;
+    // 兜底：解码器没按 16k 给（线性重采样，质量一般但能用）
+    const ratio = rate / 16000, n = Math.floor(mix.length / ratio), out = new Float32Array(n);
+    for (let i = 0; i < n; i++) out[i] = mix[Math.floor(i * ratio)];
+    return out;
+  } finally {
+    try { await ac.close(); } catch (e) {}   // 不 close 会累积到浏览器上限（约 6）→ 声纹/语音输入全挂
+  }
 }
 function pcmToWav16k(pcm) {
   const n = pcm.length, view = new DataView(new ArrayBuffer(44 + n * 2));
@@ -782,7 +811,7 @@ $('mic').onclick = async () => {
   setSt('转写中…', 'work');
   let text = '';
   try { text = await asr(pcmToWav16k(pcm)); } catch (e) { sys('转写失败：' + e.message); }
-  if (!text) { sys(cfg.asr ? '没听清，再说一次？' : '（没配语音识别模型：设置里填一个语音模型，或接着打字）'); setSt('就绪', 'on'); return; }
+  if (!text) { sys(pickEP('asr').model ? '没听清，再说一次？' : '（没配语音识别模型：设置里填一个语音模型，或接着打字）'); setSt('就绪', 'on'); return; }
   sys('🎤 ' + text);
   await ask(text, {});
 };
@@ -858,9 +887,8 @@ async function ask(text, opts) {
   const msgs = [{ role: 'system', content: cfg.sys }, ...chatHistory.slice(-10),
                 { role: 'user', content: imgs.length ? content : content[0].text }];
   const useVision = imgs.length > 0;
-  const epBase = useVision ? (cfg.auxbase || cfg.base) : cfg.base;
-  const epKey = useVision ? (cfg.auxkey || cfg.key) : cfg.key;
-  const epModel = useVision ? (cfg.vl || cfg.model) : cfg.model;
+  const ep = useVision ? pickEP('vision') : pickEP('main');
+  const epBase = ep.base, epKey = ep.key, epModel = ep.model;
   try {
     const r = await fetch(epBase + '/chat/completions', {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + epKey },
