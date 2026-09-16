@@ -10,14 +10,15 @@
   3. 自定义敏感词（学校名、老师名、真名等，用 --hints 传）
   4. 大文件（>5MB，别直接进 git）
   5. .gitignore 是否存在、是否覆盖上面命中的敏感文件
-  6. （--history）git 历史里是否出现过敏感文件名——历史泄露最难补救
+  6. （--history）git 历史里出现过的敏感**文件名** + 历史提交里的**内容**
+     （密钥/手机号/身份证/自定义敏感词）——历史泄露最难补救：
+     改名、删文件、甚至重写分支都删不掉仍在 clone / fork / 快照里的旧提交。
 
 退出码：0 = 没发现 BLOCKER；1 = 有 BLOCKER。
 """
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import subprocess
 import sys
@@ -52,37 +53,87 @@ CONTENT_PATTERNS = [
 PUBLIC_IP = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 PRIVATE_IP = re.compile(r"^(?:10\.|127\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|0\.0\.0\.0$|255\.)")
 
+# 文档里的占位示例（sk-xxxxxxxx / YOUR_KEY / example）不该当密钥报
+PLACEHOLDER_HINTS = ("example", "placeholder", "your", "xxx", "todo", "fake", "dummy",
+                     "sample", "test", "自定义", "见 .env", "你的", "换成")
 
-def scan_file(path: Path, hints: list[str], max_bytes: int = 2_000_000):
-    """返回 [(级别, 说明, 行号, 片段)]"""
+
+def looks_placeholder(matched: str, line: str) -> bool:
+    s = (matched + " " + line).lower()
+    if any(k in s for k in PLACEHOLDER_HINTS):
+        return True
+    body = re.sub(r"[^A-Za-z0-9]", "", matched)
+    return bool(body) and len(set(body)) <= 2          # sk-aaaaaaa… 这种
+
+
+def scan_text(text: str, hints: list[str]):
+    """扫一段文本 → [(级别, 说明, 行号, 片段)]（当前树与历史内容共用）"""
     found = []
-    try:
-        text = path.read_text(encoding="utf-8", errors="ignore")
-    except Exception:
-        return found
-    lines = text.splitlines()
-    for ln, line in enumerate(lines, 1):
+    for ln, line in enumerate(text.splitlines(), 1):
         for pat, desc, level in CONTENT_PATTERNS:
             m = re.search(pat, line)
-            if m:
+            if m and not looks_placeholder(m.group(0), line):
                 found.append((level, desc, ln, m.group(0)[:60]))
         for m in PUBLIC_IP.finditer(line):
             ip = m.group(0)
             if not PRIVATE_IP.match(ip):
-                # 版本号(1.2.3.4 形式的依赖)会误报：要求出现上下文关键词
-                ctx = line.lower()
+                ctx = line.lower()      # 版本号(1.2.3.4)会误报：要求出现上下文关键词
                 if any(k in ctx for k in ("host", "url", "ip", "http", "://", "addr", "server", "wss")):
                     found.append(("WARN", "公网 IP", ln, ip))
         for h in hints:
             if h and h in line:
-                found.append(("BLOCKER", f"敏感词「{h}」", ln, h))
+                found.append(("BLOCKER", f"敏感词「{h}」", ln, line.strip()[:80]))
     return found
+
+
+def scan_file(path: Path, hints: list[str]):
+    try:
+        return scan_text(path.read_text(encoding="utf-8", errors="ignore"), hints)
+    except Exception:
+        return []
+
+
+def scan_history_content(root: Path, hints: list[str], max_blobs: int = 3000, max_bytes: int = 1_000_000):
+    """扫 git 历史里所有提交涉及的内容（按对象去重）。返回 4 元组列表。"""
+    try:
+        out = subprocess.run(["git", "-C", str(root), "rev-list", "--objects", "--all"],
+                             capture_output=True, text=True, timeout=180).stdout
+    except Exception as e:
+        return [("INFO", f"git 历史内容检查失败：{e}", 0, "")]
+
+    objects: dict[str, str] = {}
+    for line in out.splitlines():
+        parts = line.split(" ", 1)
+        if len(parts) == 2:
+            objects.setdefault(parts[0], parts[1])
+
+    hits, seen, tested = [], set(), 0
+    for sha, path in objects.items():
+        if tested >= max_blobs:
+            hits.append(("INFO", f"历史对象超过 {max_blobs} 个，其余未扫（可加 --history-limit 提高）", 0, ""))
+            break
+        tested += 1
+        try:
+            blob = subprocess.run(["git", "-C", str(root), "cat-file", "-p", sha],
+                                  capture_output=True, timeout=60).stdout
+        except Exception:
+            continue
+        if not blob or len(blob) > max_bytes or b"\x00" in blob[:4096]:
+            continue
+        for level, desc, ln, frag in scan_text(blob.decode("utf-8", "ignore"), hints):
+            key = (sha, desc, frag)
+            if key in seen:
+                continue
+            seen.add(key)
+            hits.append((level, f"历史内容 {path}（{sha[:7]}）{desc}", ln, frag))
+    return hits
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("path")
-    ap.add_argument("--history", action="store_true", help="同时检查 git 历史里的文件名")
+    ap.add_argument("--history", action="store_true",
+                    help="同时检查 git 历史的文件名与历史提交内容（密钥/手机号/敏感词）")
     ap.add_argument("--hints", default="", help="逗号分隔的敏感词（学校/老师/真名等）")
     args = ap.parse_args()
 
@@ -122,6 +173,7 @@ def main():
         infos.append("没有 .gitignore 文件")
 
     if args.history and (root / ".git").exists():
+        # 6a. 历史里的文件名
         try:
             out = subprocess.run(["git", "-C", str(root), "log", "--all", "--name-only",
                                   "--pretty=format:"], capture_output=True, text=True, timeout=60).stdout
@@ -130,9 +182,19 @@ def main():
                 if nm.endswith((".example", ".sample", ".template", ".dist")) or ".example." in nm:
                     continue                      # 示例文件本来就该提交
                 if any(re.search(pat, nm, re.I) for pat, _ in BLOCK_NAMES):
-                    blockers.append(f"git 历史里出现过：{name}（历史泄露，需重写历史或换新仓库）")
+                    blockers.append(f"git 历史里出现过文件：{name}（历史泄露，需重写历史或换新仓库）")
         except Exception as e:
-            infos.append(f"git 历史检查失败：{e}")
+            infos.append(f"git 历史文件名检查失败：{e}")
+
+        # 6b. 历史提交里的内容（密钥/手机号/敏感词）——只查文件名会漏掉"内容里写过真名"
+        for level, desc, ln, frag in scan_history_content(root, hints):
+            rec = f"{desc}" + (f"：{frag}" if frag else "")
+            if level == "BLOCKER":
+                blockers.append(rec)
+            elif level == "WARN":
+                warns.append(rec)
+            else:
+                infos.append(rec)
 
     print(f"\n===== 开源前审查：{root} =====")
     for title, items in (("🔴 BLOCKER（必须处理）", blockers), ("🟡 提示（建议处理）", warns), ("ℹ️ 其他", infos)):
