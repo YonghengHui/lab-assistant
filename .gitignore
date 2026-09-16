@@ -1,5 +1,6 @@
 # 绝不提交
 .env
+sensitive-words.txt
 *.pem
 *.key
 *.crt

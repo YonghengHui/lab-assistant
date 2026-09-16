@@ -14,6 +14,10 @@
      （密钥/手机号/身份证/自定义敏感词）——历史泄露最难补救：
      改名、删文件、甚至重写分支都删不掉仍在 clone / fork / 快照里的旧提交。
 
+被 .gitignore 排除的路径会跳过（它们本来就进不了仓库）——所以**别指望它替你检查
+被 ignore 的文件**；反过来，本地词表 sensitive-words.txt 这类文件名不带敏感词的
+"私人文件"要自己记得 ignore。
+
 退出码：0 = 没发现 BLOCKER；1 = 有 BLOCKER。
 """
 from __future__ import annotations
@@ -33,7 +37,8 @@ BLOCK_NAMES = [
     (r"voiceprint", "声纹数据（生物特征）"),
     (r"^sessions?$", "会话历史目录"),
     (r"docs\.json$", "上传的资料内容"),
-    (r"credential|secret|token|passwd|password", "凭据类文件名"),
+    # 只看"像凭据文件名"的：secret_guard.sh / pre-commit-secret-guard.sh 这类脚本不算
+    (r"(?i)(?:^|[._-])(credentials?|secrets?|passwords?|passwd|tokens?)(?:\.|$)", "凭据类文件名"),
 ]
 
 CONTENT_PATTERNS = [
@@ -55,7 +60,8 @@ PRIVATE_IP = re.compile(r"^(?:10\.|127\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|
 
 # 文档里的占位示例（sk-xxxxxxxx / YOUR_KEY / example）不该当密钥报
 PLACEHOLDER_HINTS = ("example", "placeholder", "your", "xxx", "todo", "fake", "dummy",
-                     "sample", "test", "自定义", "见 .env", "你的", "换成")
+                     "sample", "test", "自定义", "见 .env", "你的", "换成",
+                     "示例", "例：", "例如", "举例", "占位")
 
 
 def looks_placeholder(matched: str, line: str) -> bool:
@@ -93,6 +99,19 @@ def scan_file(path: Path, hints: list[str]):
         return []
 
 
+def ignored_by_git(root: Path) -> set[str]:
+    """仓库里被 .gitignore 排除的路径（相对仓库根），这些本来就不会被发布。"""
+    if not (root / ".git").exists():
+        return set()
+    try:
+        out = subprocess.run(["git", "-C", str(root), "ls-files", "--others", "--ignored",
+                              "--exclude-standard", "--directory"],
+                             capture_output=True, text=True, timeout=60).stdout
+    except Exception:
+        return set()
+    return {line.strip().rstrip("/") for line in out.splitlines() if line.strip()}
+
+
 def scan_history_content(root: Path, hints: list[str], max_blobs: int = 3000, max_bytes: int = 1_000_000):
     """扫 git 历史里所有提交涉及的内容（按对象去重）。返回 4 元组列表。"""
     try:
@@ -110,7 +129,7 @@ def scan_history_content(root: Path, hints: list[str], max_blobs: int = 3000, ma
     hits, seen, tested = [], set(), 0
     for sha, path in objects.items():
         if tested >= max_blobs:
-            hits.append(("INFO", f"历史对象超过 {max_blobs} 个，其余未扫（可加 --history-limit 提高）", 0, ""))
+            hits.append(("INFO", f"历史对象超过 {max_blobs} 个，其余未扫", 0, ""))
             break
         tested += 1
         try:
@@ -140,11 +159,18 @@ def main():
     root = Path(args.path).resolve()
     hints = [h.strip() for h in args.hints.split(",") if h.strip()]
     blockers, warns, infos = [], [], []
+    ignored = ignored_by_git(root)
+    skipped = 0
 
     for p in sorted(root.rglob("*")):
         if any(part in SKIP_DIRS for part in p.parts):
             continue
         rel = p.relative_to(root)
+        rel_str = str(rel)
+        # 被 .gitignore 排除的路径不会进仓库，跳过（否则本地词表会被自己报出来）
+        if ignored and (rel_str in ignored or any(rel_str.startswith(i + "/") for i in ignored)):
+            skipped += 1
+            continue
         # 示例/模板文件（.env.example 之类）本来就是要提交的，别误报
         is_sample = p.suffix.lower() in {".example", ".sample", ".template", ".dist"} or ".example." in p.name
         if p.is_dir():
@@ -162,6 +188,9 @@ def main():
             for level, desc, ln, frag in scan_file(p, hints):
                 rec = f"{rel}:{ln} —— {desc}：{frag}"
                 (blockers if level == "BLOCKER" else warns).append(rec)
+
+    if skipped:
+        infos.append(f"跳过 {skipped} 个被 .gitignore 排除的路径（不会发布到仓库）")
 
     gi = root / ".gitignore"
     if gi.exists():

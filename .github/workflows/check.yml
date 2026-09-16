@@ -1,0 +1,26 @@
+name: check
+
+# 每次 push / PR 自动跑本地同一套自检（语法 + 密钥/隐私扫描，含 git 历史）
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # 历史扫描需要完整历史，别只取 1 个提交
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: 自检（语法 + 密钥/隐私扫描）
+        run: bash scripts/check.sh
+      # 说明：CI 里没有 sensitive-words.txt（个人信息词表不入库），
+      # 所以它只能查通用模式（密钥/手机号/身份证/邮箱/家目录等）。
+      # 你自己那份词表请在本地跑 scripts/publish-check.sh 时用。

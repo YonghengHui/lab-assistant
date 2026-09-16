@@ -73,6 +73,19 @@ cp .env.example .env && vi .env           # 填 API key（启动时自动读取 
 - commit 信息一句话说清**为什么**改，中英文都行
 - 大改动先开 issue 聊一下，别闷头写三天
 
+## 隐私与密钥：推之前的三道闸
+
+公开仓库一旦推上去就收不回来（快照 / 镜像 / 别人 clone），所以别靠"我这次看仔细"，靠三层自动闸：
+
+1. **提交前**（本地）：`bash scripts/install-hooks.sh`（每个 clone 跑一次）→ 以后 `git commit`
+   自动扫暂存内容，密钥和你的个人信息词命中就拒绝提交（临时跳过：`git commit --no-verify`）。
+2. **发布前**（本地）：`bash scripts/publish-check.sh` → 语法自检 + 密钥/隐私扫描（含 **git 历史里的内容**）。
+   个人信息靠词表 `sensitive-words.txt`（**不入库**，从 `sensitive-words.example.txt` 复制填写）。
+3. **推送后**（平台）：`.github/workflows/check.yml` 每次 push / PR 自动跑 `scripts/check.sh`。
+
+> 注意 GitHub 的 secret scanning / push protection 只认**密钥格式**（API key、token…），
+> **真名 / 学号 / 手机号 / 截图里的内容它一概不管**——那部分只能靠上面第 1、2 层的词表。
+
 ## 已知的坑（欢迎顺手修）
 
 - 单文件版语音播报用手机自带 TTS：不同浏览器音色差很多，可考虑接 API TTS
